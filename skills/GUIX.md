@@ -270,10 +270,14 @@ Python can take seconds to start. Wait for its line
 - The pinned shell and both `hurd64` image types are verified.
 - The base image and 9pfs driver build, and both accounts accept their keys.
 - The 9pfs canary read and host-visible write are verified in a custom guest.
-- The custom guest's mounted-halt command received no approval; no shutdown
-  result is claimed for that guest.
+- A managed 9pfs guest completed `make guix-stop` both with the translator
+  mounted and after detaching it. The older mounted-hang symptom was not
+  reproduced in those runs; its cause is still unresolved.
 - The original `pfinet` boot hang and 9pfs shutdown correlation are not
   root-caused. No Hurd or 9pfs source fix is established.
-- The Hurd startup path may print `startup: shutdown: No such file or
-  directory` before the Mach halt marker. That helper failure is separate
-  from the marker and needs its own investigation.
+- Hurd startup reports `startup: shutdown: No such file or directory` when
+  `/servers/shutdown` is absent. A test-only one-shot service installed that
+  translator, but the subsequent stop timed out before Hurd shutdown
+  notifications. That experiment was reverted and is not a verified fix.
+  After reverting it, the default guest again passed the normal start and
+  clean stop sequence.
