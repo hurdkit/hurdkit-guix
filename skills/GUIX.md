@@ -42,8 +42,10 @@ make guix-stop
 `make guix-start` waits for a successful SSH login on host port 2223 and
 retries a boot that does not answer within 180 seconds, up to three boots.
 `make guix-status` reports whether the guest is running and SSH answers.
-`make guix-stop` sends `halt`, waits for GNU Mach's shutdown marker, then
-stops QEMU because a Hurd halt does not power off the virtual machine.
+`make guix-stop` sends `halt` with a bounded SSH control channel, waits for
+GNU Mach's shutdown marker in the active boot's serial log, then stops QEMU
+because a Hurd halt does not power off the virtual machine. A forced stop
+without that marker returns failure; it is not a clean shutdown.
 
 ### Rebuild and persistent state
 
@@ -61,8 +63,11 @@ before replacing the base. After an unclean stop, run `make guix-repair`.
 `make guix-reset-state` deletes the kept state after the guest is stopped.
 `make guix-image` refuses to replace the base while a kept state exists.
 
-For a guest that does not answer, inspect `img/guix/serial.log` and use
+For a guest that does not answer, inspect `img/guix/serial-N.log` and use
 `make guix-screenshot` to save the VGA console as `img/guix/screen.ppm`.
+`.serial-current` names the active attempt; `serial.log` is preserved after
+stop. Every timed-out disposable boot gets a fresh overlay. Persistent retries
+retain their state and repair it before the next attempt.
 
 ### Host archive signing
 
@@ -278,18 +283,36 @@ the QEMU monitor. `VIRTIO_ADDR=0x5` is the isolated-IRQ control; do not infer
 a Hurd boot fix from a driver or IRQ result.
 
 The pinned guest passed the 24-assertion virtio I/O matrix on 2026-11-15.
-Its subsequent halt did not reach the Mach shutdown marker within 60 seconds.
-`guix stop` and the wrapper return failure for that forced stop. This is an
-unresolved shutdown failure, not a passing lifecycle gate. The ordinary boot
-never attaches the virtio device.
+One run's halt did not reach the Mach shutdown marker within 60 seconds;
+`guix stop` and the wrapper correctly returned failure. A later controlled run
+passed the same matrix and shut down cleanly. The earlier symptom is therefore
+intermittent, not a failure of every virtio-9p guest. The ordinary boot never
+attaches the virtio device.
+
+Set `GUIX_BASE_IMG` to an explicit base for a diagnostic variant. Relative
+paths are resolved before the wrapper links the base into its temporary
+`GUIX_DIR`. Use `VIRTIO_STORE` and `P9FS_STORE` for packages built against
+that guest's Hurd libraries; their interpreter and library closure must be
+present in the guest. The opt-in image includes its diagnostic packages for
+this reason. These packages are not boot-critical services.
 
 The opt-in `guix/hurd-upstream.scm` package and `guix/hurd64-upstream.scm`
-guest are diagnostics, not a replacement for the reference pin. An earlier
-image built and booted with newer Hurd boot servers, but still launched the
-old `pfinet`. The revised declaration changes the network service to use the
-newer package; its full image and guest verification are not yet complete.
-Do not claim that the pfinet or ext2fs commits fix the observed stalls until
-that controlled comparison has run.
+guest are diagnostics, not a replacement for the reference pin. The selected
+Hurd revision is `881e887bfc45e61ab08adace04faa32d1711526d`. The complete
+image is built with the pinned toolchain:
+
+```sh
+nix develop ./nix#guix -c env \
+    GUIX_DIR="$PWD/img/guix/upstream-complete" \
+    GUIX_OS="$PWD/guix/hurd64-upstream.scm" GUIX_SSH_PORT=2230 \
+    bash scripts/guix_vm.sh image
+```
+
+The declaration replaces the network service's `pfinet` path as well as the
+boot servers. The verified no-device control used the newer `pfinet`, reached
+SSH, and shut down cleanly. Its controlled virtio run passed all 24 assertions
+and shut down cleanly. These successful runs do not establish a statistical
+fix for the intermittent `pfinet` boot stall.
 
 ## Current verification limits
 
@@ -300,7 +323,11 @@ that controlled comparison has run.
   mounted and after detaching it. The older mounted-hang symptom was not
   reproduced in those runs; its cause is still unresolved.
 - The original `pfinet` boot hang and 9pfs shutdown correlation are not
-  root-caused. No Hurd or 9pfs source fix is established.
+  root-caused. No Hurd or 9pfs source fix is established by the successful
+  controls above.
+- The Debian virtio control reached login and detected the device, but did not
+  complete a successful mount matrix. The passing Guix matrix does not prove
+  that the Debian provisioning or driver control passes.
 - Hurd startup reports `startup: shutdown: No such file or directory` when
   `/servers/shutdown` is absent. A test-only one-shot service installed that
   translator, but the subsequent stop timed out before Hurd shutdown

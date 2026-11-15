@@ -74,7 +74,7 @@ PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" \
     -device virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare > "$TEST_DIR/output" 2>&1
 rc=$?
 
-echo '1..10'
+echo '1..12'
 failures=0
 if (( rc != 0 )); then
     echo 'ok 1 - all synthetic boot attempts time out'
@@ -202,6 +202,47 @@ else
     echo 'not ok 10 - halt SSH command lacks a finite timeout'
     sed 's/^/# /' "$TEST_DIR/halt-output" 2>/dev/null
     sed 's/^/# /' "$TEST_DIR/halt-ssh.argv" 2>/dev/null
+    failures=1
+fi
+# Stop must read the active attempt's log, not the initial snapshot.
+cat > "$TEST_DIR/bin/ssh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' -- "$@" >> "$TEST_DIR/stop-ssh.argv"
+printf 'Shutdown completed successfully, now in tight loop.\n' > "$TEST_DIR/guix/serial-1.log"
+exit 255
+SH
+sleep 30 &
+printf '%s\n' "$!" > "$TEST_DIR/guix/qemu.pid"
+printf '%s\n' "$!" >> "$TEST_DIR/synthetic-pids"
+printf '%s\n' "$TEST_DIR/guix/serial-1.log" > "$TEST_DIR/guix/.serial-current"
+: > "$TEST_DIR/guix/serial.log"
+: > "$TEST_DIR/guix/serial-1.log"
+PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" SSH_KEY_DIR="$TEST_DIR/keys" \
+    bash "$REPO_ROOT/scripts/guix_vm.sh" stop > "$TEST_DIR/active-stop-output" 2>&1
+active_stop_rc=$?
+if (( active_stop_rc == 0 )) && grep -q 'guest has shut down' "$TEST_DIR/active-stop-output" &&
+   grep -q 'Shutdown completed successfully' "$TEST_DIR/guix/serial.log"; then
+    echo 'ok 11 - stop reads the active serial log and preserves its marker'
+else
+    echo 'not ok 11 - stop missed the active serial log'
+    sed 's/^/# /' "$TEST_DIR/active-stop-output"
+    failures=1
+fi
+# A stale log pointer must not hide the preserved shutdown marker.
+printf '%s\n' "$TEST_DIR/guix/missing.log" > "$TEST_DIR/guix/.serial-current"
+printf 'Shutdown completed successfully, now in tight loop.\n' > "$TEST_DIR/guix/serial.log"
+sleep 30 &
+printf '%s\n' "$!" > "$TEST_DIR/guix/qemu.pid"
+printf '%s\n' "$!" >> "$TEST_DIR/synthetic-pids"
+PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" SSH_KEY_DIR="$TEST_DIR/keys" \
+    bash "$REPO_ROOT/scripts/guix_vm.sh" stop > "$TEST_DIR/stale-pointer-output" 2>&1
+stale_pointer_rc=$?
+if (( stale_pointer_rc == 0 )) &&
+   grep -q 'Shutdown completed successfully' "$TEST_DIR/guix/serial.log"; then
+    echo 'ok 12 - a stale serial pointer falls back to the preserved log'
+else
+    echo 'not ok 12 - a stale serial pointer hid the preserved log'
+    sed 's/^/# /' "$TEST_DIR/stale-pointer-output"
     failures=1
 fi
 exit "$failures"

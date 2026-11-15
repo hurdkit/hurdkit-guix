@@ -18,7 +18,8 @@
            (string=? (basename file) "virtio-9p")
            (string=? (basename file) ".git"))))
 
-(package
+(define-public virtio-9p
+  (package
   (name "virtio-9p")
   (version (or (getenv "VIRTIO_9P_VERSION") "0-hurdkit"))
   (source (local-file %source-directory "virtio-9p-checkout"
@@ -43,4 +44,15 @@
   (description "Expose a QEMU virtio-9p PCI device as a character device for
 an unmodified 9pfs translator. This package uses the guest's Guix-built Hurd
 libraries, not the Debian toolchain's /lib ELF interpreter.")
-  (license license:gpl3+))
+  (license license:gpl3+)))
+
+(define-public virtio-9p-upstream
+  (package
+    (inherit virtio-9p)
+    (name "virtio-9p-upstream")
+    (version "0-hurdkit-upstream")
+    (inputs (list (load "hurd-upstream.scm") libirqhelp libpciaccess-static))))
+
+(if (equal? (getenv "VIRTIO_9P_VARIANT") "upstream")
+    virtio-9p-upstream
+    virtio-9p)

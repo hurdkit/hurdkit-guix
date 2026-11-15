@@ -16,6 +16,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 export GUIX_DIR="${GUIX_DIR:-$REPO_ROOT/img/guix/virtio-test}"
+GUIX_BASE_IMG="${GUIX_BASE_IMG:-$REPO_ROOT/img/guix/hurd64.base.qcow2}"
 export GUIX_SSH_PORT="${GUIX_SSH_PORT:-2231}"
 export GUIX_BOOT_ATTEMPTS="${GUIX_BOOT_ATTEMPTS:-2}"
 export GUIX_BOOT_TIMEOUT="${GUIX_BOOT_TIMEOUT:-180}"
@@ -59,14 +60,15 @@ if [[ -e "$GUIX_DIR" ]]; then
     echo "guix-virtio-test: $GUIX_DIR already exists; choose an unused diagnostic directory" >&2
     exit 1
 fi
-[[ -f "$REPO_ROOT/img/guix/hurd64.base.qcow2" ]] || {
-    echo "guix-virtio-test: build the ordinary Guix base first (make guix-image)" >&2
+[[ -f "$GUIX_BASE_IMG" ]] || {
+    echo "guix-virtio-test: missing base image $GUIX_BASE_IMG (build it with make guix-image)" >&2
     exit 1
 }
 [[ -f "$SSH_KEY" ]] || {
     echo "guix-virtio-test: missing root key $SSH_KEY" >&2
     exit 1
 }
+GUIX_BASE_IMG="$(readlink -f "$GUIX_BASE_IMG")"
 refresh_serial_log() {
     local latest
     latest="$(find "$GUIX_DIR" -maxdepth 1 -type f -name 'serial-[0-9]*.log' \
@@ -103,7 +105,7 @@ trap cleanup EXIT
 
 mkdir -p "$GUIX_DIR/tmp" "$SHARE"
 # This is a diagnostic image only; it never replaces img/guix/hurd64.base.qcow2.
-ln -s "$REPO_ROOT/img/guix/hurd64.base.qcow2" "$GUIX_DIR/hurd64.base.qcow2"
+ln -s "$GUIX_BASE_IMG" "$GUIX_DIR/hurd64.base.qcow2"
 if [[ -z "$P9FS_STORE" ]]; then
     P9FS_STORE="$($GUIX build --target=x86_64-pc-gnu -f "$REPO_ROOT/guix/9pfs.scm")"
 fi

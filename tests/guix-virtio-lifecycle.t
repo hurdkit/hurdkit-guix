@@ -43,7 +43,7 @@ rc=$?
 set -e
 trap - EXIT
 
-echo '1..4'
+echo '1..6'
 failures=0
 if (( rc != 0 )); then
     echo 'ok 1 - a forced shutdown fails even after a passing matrix'
@@ -70,5 +70,32 @@ else
     echo 'not ok 4 - virtio start options were lost'
     failures=1
 fi
+if [[ -L "$TEST_DIR/guix/hurd64.base.qcow2" ]] &&
+   [[ "$(readlink "$TEST_DIR/guix/hurd64.base.qcow2")" == "$TEST_DIR/img/guix/hurd64.base.qcow2" ]]; then
+    echo 'ok 5 - the default diagnostic base is linked before boot'
+else
+    echo 'not ok 5 - the diagnostic base was not selected explicitly'
+    failures=1
+fi
 rm -rf "$TEST_DIR"
+# A relative base override must not become a link relative to GUIX_DIR.
+BASE_DIR="$(mktemp -d)"
+trap 'rm -rf "$BASE_DIR"' EXIT
+printf '#!/usr/bin/env bash\nexit 99\n' > "$BASE_DIR/guix"
+chmod +x "$BASE_DIR/guix"
+touch "$BASE_DIR/hurd64.base.qcow2" "$BASE_DIR/key"
+set +e
+(cd "$BASE_DIR" && TEST_ROOT="$BASE_DIR" GUIX="$BASE_DIR/guix" \
+    GUIX_DIR="$BASE_DIR/guest" GUIX_BASE_IMG=hurd64.base.qcow2 \
+    SHARE="$BASE_DIR/share" SSH_KEY="$BASE_DIR/key" \
+    bash "$REPO_ROOT/scripts/guix_virtio_test.sh" > "$BASE_DIR/output" 2>&1)
+base_rc=$?
+set -e
+if [[ "$(readlink "$BASE_DIR/guest/hurd64.base.qcow2")" == "$BASE_DIR/hurd64.base.qcow2" ]]; then
+    echo 'ok 6 - relative base overrides are normalized before linking'
+else
+    echo 'not ok 6 - relative base overrides are normalized before linking'
+    sed 's/^/# /' "$BASE_DIR/output"
+fi
+rm -rf "$BASE_DIR"
 exit "$failures"

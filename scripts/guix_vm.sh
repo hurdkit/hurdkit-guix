@@ -253,7 +253,7 @@ cmd_start() {
         fi
         SERIAL_LOG="$GUIX_DIR/serial-$attempt.log"
         : > "$SERIAL_LOG"
-        cp -f "$SERIAL_LOG" "$GUIX_DIR/serial.log"
+        printf '%s\n' "$SERIAL_LOG" > "$GUIX_DIR/.serial-current"
         rm -f "$MONITOR_SOCKET"
         # The monitor socket lets the host talk to QEMU itself, for example
         # to take a screenshot of the VGA console (make guix-screenshot).
@@ -307,6 +307,13 @@ cmd_stop() {
         echo "guix_vm: the guest is not running"
         rm -f "$PID_FILE" "$RUN_IMG"
         return 0
+    fi
+    if [[ -s "$GUIX_DIR/.serial-current" ]]; then
+        local active_log
+        active_log="$(cat "$GUIX_DIR/.serial-current")"
+        if [[ -f "$active_log" ]]; then
+            SERIAL_LOG="$active_log"
+        fi
     fi
     # A clean shutdown matters for a kept state: the root filesystem is
     # ext2 without a journal. "halt" shuts the Hurd down but does not power

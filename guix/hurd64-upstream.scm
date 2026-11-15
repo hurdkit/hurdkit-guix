@@ -17,6 +17,17 @@
 
 (define hurd-upstream
   (load "hurd-upstream.scm"))
+;; Keep diagnostic tools in the image's closure so their interpreters and
+;; libraries exist in the guest. They are invoked only by guix_virtio_test.sh.
+(define virtio-9p-upstream
+  (let ((old (getenv "VIRTIO_9P_VARIANT")))
+    (dynamic-wind
+      (lambda () (setenv "VIRTIO_9P_VARIANT" "upstream"))
+      (lambda () (load "virtio-9p.scm"))
+      (lambda () (if old (setenv "VIRTIO_9P_VARIANT" old)
+                     (unsetenv "VIRTIO_9P_VARIANT"))))))
+(define 9pfs-upstream
+  (load "9pfs-upstream.scm"))
 
 ;; These record accessors and the option conversion are private in goonix.
 (define static-networking-provision
@@ -98,9 +109,9 @@
       (essential-services (hurd-default-essential-services this-operating-system))
       (services (upstream-static-networking (operating-system-user-services base)))
       ;; Keep the guest's utilities ABI-compatible with its boot servers.
-      (packages (cons hurd-upstream
-                      (filter (lambda (package)
-                                (not (eq? package hurd)))
-                              (operating-system-packages base)))))))
+      (packages (cons* hurd-upstream virtio-9p-upstream 9pfs-upstream
+                       (filter (lambda (package)
+                                 (not (eq? package hurd)))
+                               (operating-system-packages base)))))))
 
 %upstream-operating-system
