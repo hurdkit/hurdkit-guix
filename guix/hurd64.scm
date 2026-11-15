@@ -11,11 +11,17 @@
 (use-service-modules ssh)
 (use-package-modules ssh)
 
+;; The guest's guix command and guix-daemon are goonix, like the host's
+;; (see goonix.scm), not the upstream Guix package.
+(define %goonix
+  (load "goonix.scm"))
+
 (define %guix-services
   (modify-services %base-services+qemu-networking/hurd
     (guix-service-type
      config => (guix-configuration
                 (inherit config)
+                (guix %goonix)
                 ;; Only the public half is in the repository. The matching
                 ;; private half is /etc/guix/signing-key.sec on the host.
                 (authorized-keys
