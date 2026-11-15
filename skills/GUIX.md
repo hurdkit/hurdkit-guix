@@ -9,6 +9,7 @@ Use this skill for work on the Guix guest (`guix/`, `guix.mk`,
 
 - `nix/flake.nix` and `nix/flake.lock`: the pinned goonix development shell.
 - `guix/hurd64.scm`: the system declaration.
+- `guix/goonix.scm`: goonix as the guest's own Guix (same commit as the lock).
 - `guix/hurd64-drivers.scm` and `guix/9pfs.scm`: the optional driver guest.
 - `guix.mk` and `scripts/guix_vm.sh`: build and lifecycle commands.
 - `img/guix/`: the Guix base image, overlays and logs.
@@ -25,8 +26,12 @@ NixOS configuration as part of these commands.
 
 ### Build and boot
 
-Run all Guix commands in the pinned shell. Check that the first version line
-contains `goonix`; never run `guix pull` for this project.
+Host, shell and guest all run goonix, our fork of Guix, at the commit that
+`nix/flake.lock` pins: the host daemon through `services.guix.package` (see
+"Host" below), the `guix` command through the pinned shell, and the guest
+through `guix/goonix.scm`. Run all Guix commands in the pinned shell. Check
+that the first version line contains `goonix`; `guix_vm.sh image` refuses
+any other Guix. Never run `guix pull` for this project.
 
 ```sh
 nix develop ./nix#guix
@@ -39,13 +44,40 @@ make guix-stop
 
 `make guix-image` prints the store image and
 `img/guix/hurd64.base.qcow2`; a second run reports that it is up to date.
+The first build on a machine cross-compiles goonix for the guest (about 15
+minutes with 16 cores); everything else is downloaded from the build farm.
+In the guest, `guix --version` prints the same goonix line as on the host and
+`guix describe` names the goonix repository and commit.
 `make guix-start` waits for a successful SSH login on host port 2223 and
 retries a boot that does not answer within 180 seconds, up to three boots.
 `make guix-status` reports whether the guest is running and SSH answers.
-`make guix-stop` sends `halt` with a bounded SSH control channel, waits for
-GNU Mach's shutdown marker in the active boot's serial log, then stops QEMU
-because a Hurd halt does not power off the virtual machine. A forced stop
-without that marker returns failure; it is not a clean shutdown.
+`make guix-stop` sends `halt` over SSH (in the background, at most 15
+seconds), waits for GNU Mach's shutdown marker in the active boot's serial
+log, then stops QEMU because a Hurd halt does not power off the virtual
+machine; about 20 seconds in all. A forced stop without that marker returns
+failure; it is not a clean shutdown. `make guix-status` prints `stopped` and
+exits nonzero when no guest runs.
+
+### Host
+
+The host needs a Guix daemon that is goonix too. On NixOS (this machine,
+`/etc/nixos`): goonix is a flake input and
+
+```nix
+services.guix.enable = true;
+services.guix.package = inputs.goonix.packages.${pkgs.stdenv.hostPlatform.system}.default;
+services.avahi.enable = false;  # services.guix would switch it on
+```
+
+Keep that input at the commit `nix/flake.lock` pins. After a switch that
+changes the daemon, check `systemctl is-active guix-daemon.socket`: if the
+service restarted before its socket ("Socket service guix-daemon.service
+already active, refusing"), run `systemctl stop guix-daemon.service` and
+`systemctl start guix-daemon.socket`.
+
+Moving the goonix pin: update `nix/flake.lock` (`nix flake update goonix
+--flake ./nix`), the system flake's lock, and `%goonix-commit` plus its hash
+in `guix/goonix.scm`; `tests/goonix-pin.t` checks the last against the first.
 
 ### Rebuild and persistent state
 
@@ -88,7 +120,7 @@ driver with Guix so it uses the guest's libraries:
 guix build --target=x86_64-pc-gnu -f guix/9pfs.scm
 file "$(guix build --target=x86_64-pc-gnu -f guix/9pfs.scm)/bin/9pfs"
 make guix-image GUIX_OS=guix/hurd64-drivers.scm
-make guix-start GUIX_OS=guix/hurd64-drivers.scm
+make guix-start
 bash scripts/guix_vm.sh ssh root 'command -v 9pfs; 9pfs --version'
 ```
 
@@ -116,15 +148,69 @@ bash scripts/guix_vm.sh ssh root 'settrans -g -f /host; rm -f /host'
 The guest must read the canary and write a file visible on the host. Stop the
 host server afterward. A host-side SSH timeout does not by itself prove that
 a translator failed; inspect `ps -x` and the mount inside the guest.
+After 9pfs has run, `make guix-stop` may not get a clean shutdown (G20).
+
+### Virtio-9p diagnostics
+
+Use the upstream `scripts/virtio_test.py` assertions through the Guix wrapper:
+`make guix-virtio-test` inside `nix develop ./nix#guix`. It builds the Guix
+`9pfs` and `virtio-9p` packages, boots a disposable guest on port 2231 with
+an optional virtio device, and runs the device, mount, I/O, teardown, and
+recreation matrix. The driver source is the existing `~/src/virtio` checkout.
+The diagnostic directory is `img/guix/virtio-test`; it must not already exist.
+On failure the guest is left running and the directory is kept: inspect its
+`serial-N.log`, query the QEMU monitor with
+`GUIX_DIR=img/guix/virtio-test GUIX_SSH_PORT=2231 bash scripts/guix_vm.sh monitor 'info pci'`,
+and rerun the matrix on the same guest with `make guix-virtio-test REUSE=1`.
+Stop it with the `guix_vm.sh stop` line the failure prints, then remove the
+directory. `VIRTIO_ADDR=0x5` is the isolated-IRQ control; do not infer
+a Hurd boot fix from a driver or IRQ result.
+
+The pinned guest passed the 24-assertion virtio I/O matrix on 2026-11-15.
+One run's halt did not reach the Mach shutdown marker within 60 seconds;
+`guix stop` and the wrapper correctly returned failure. A later controlled run
+passed the same matrix and shut down cleanly. The earlier symptom is therefore
+intermittent, not a failure of every virtio-9p guest. The ordinary boot never
+attaches the virtio device.
+
+Set `GUIX_BASE_IMG` to an explicit base for a diagnostic variant. Relative
+paths are resolved before the wrapper links the base into its temporary
+`GUIX_DIR`. Use `VIRTIO_STORE` and `P9FS_STORE` for packages built against
+that guest's Hurd libraries; their interpreter and library closure must be
+present in the guest. The opt-in image includes its diagnostic packages for
+this reason. These packages are not boot-critical services.
+
+The opt-in `guix/hurd-upstream.scm` package and `guix/hurd64-upstream.scm`
+guest are diagnostics, not a replacement for the reference pin. The selected
+Hurd revision is `881e887bfc45e61ab08adace04faa32d1711526d`. The complete
+image is built with the pinned toolchain:
+
+```sh
+nix develop ./nix#guix -c env \
+    GUIX_DIR="$PWD/img/guix/upstream-complete" \
+    GUIX_OS="$PWD/guix/hurd64-upstream.scm" GUIX_SSH_PORT=2230 \
+    bash scripts/guix_vm.sh image
+```
+
+The declaration replaces the network service's `pfinet` path as well as the
+boot servers. The verified no-device control used the newer `pfinet`, reached
+SSH, and shut down cleanly. Its controlled virtio run passed all 24 assertions
+and shut down cleanly. These successful runs do not establish a statistical
+fix for the intermittent `pfinet` boot stall.
 
 ## Pitfalls
 
-**G1. `guix` outside the development shell is not goonix.** The host also
-has a system-wide Guix (it runs the daemon). Outside `nix develop ./nix#guix`,
-`guix --version` prints `1.5.0-unstable-…` (or whatever a `guix pull` put
-into `~/.config/guix/current`), and an image built with it is not the
-image the flake pins. Check the first line of `guix --version`; it must
-contain `goonix`. Never run `guix pull` for this work.
+**G1. An image built by another Guix is a different system.** The host
+daemon, the `nix develop ./nix#guix` shell and the guest are all goonix
+(see "Host"), but another `guix` can still come first in `PATH`, for
+example one installed by `guix pull` into `~/.config/guix/current`. Its
+package graph differs, so the image differs from the declared one even
+with identical files. This happened on 2026-11-15: an image built in the
+plain `./nix` shell, which had the nixpkgs Guix of the host then, contained
+`guix-1.5.0-6.64d4de2` instead of the guest packages of the pin.
+`guix_vm.sh image` and `guix_virtio_test.sh` therefore refuse a `guix`
+whose first `--version` line lacks `goonix` (`GUIX_ANY_VERSION=1` overrides
+that for experiments). Never run `guix pull` for this work.
 
 **G2. Substitutes exist only for commits the build farm built.** Everything
 heavy in the guest (GNU Mach, the Hurd, glibc, the cross toolchain) is
@@ -137,7 +223,10 @@ library locally: hours instead of minutes. Check before a long wait:
 lists what would be built and how much would be downloaded. A healthy run
 builds about 50 derivations with names like `shepherd-….scm`,
 `sshd_config`, `grub.cfg`, `partition.img`, `disk-image`, and none named
-`gcc-…`, `glibc-…`, `hurd-…` or `gnumach-…`.
+`gcc-…`, `glibc-…`, `hurd-…` or `gnumach-…`. The one package that is always
+built here is goonix itself (`goonix-…-checkout` and `goonix-1.5.0-goonix.…`),
+once per goonix commit; while it is missing, the dry run lists only those two,
+because the rest of the system cannot be computed without it.
 
 **G3. Our image cannot itself be downloaded, and its store path differs
 from the build farm's.** The store path of an image depends on its exact
@@ -217,24 +306,31 @@ at once and resets the connection until sshd runs. Only a successful login
 proves the guest is up; `guix_vm.sh start` waits for exactly that.
 
 **G15. The 64-bit guest sometimes hangs at boot, in the network setup.**
-Two of eleven boots in the original investigation stopped at
-`shepherd[1]: Starting service networking...`: the `loopback` and
-`networking` services never finish, so sshd never starts, and the guest
-sits idle at about 1% CPU. The cause was not found; both services start
-`pfinet`, the Hurd's TCP/IP server. `guix_vm.sh start` stops a boot without
-SSH after `GUIX_BOOT_TIMEOUT` (180 seconds) and retries up to
-`GUIX_BOOT_ATTEMPTS` (3) times, checking a kept state with `e2fsck` between
-attempts. The retry has not been verified in action. If all attempts hang,
-retain `img/guix/serial.log` and a screenshot. Do not describe this as fixed
+In the original investigation two of eleven boots stopped at
+`shepherd[1]: Starting service networking...`; on 2026-11-15 three of nine
+boots in a clean checkout hung (two of three boots of the drivers image,
+one of two of the plain image). The guest sits idle at about 1% CPU, sshd
+never starts, and the SSH client fails with `Connection timed out during
+banner exchange`. The cause was not found, but the serial log narrows it:
+a good boot prints `irq handler [11]: new delivery port … for
+/hurd/netdde(…)` right after `Service file-systems has been started.` (netdde,
+the network card driver, starting when `pfinet` opens `eth0`); the hung
+boots end at that `file-systems` line and never print it. `guix_vm.sh
+start` stops a boot without SSH after `GUIX_BOOT_TIMEOUT` (180 seconds) and
+retries up to `GUIX_BOOT_ATTEMPTS` (3) times with a fresh overlay, checking
+a kept state with `e2fsck` between attempts; this recovered every hung boot
+on 2026-11-15, at the cost of three minutes per hang. If all attempts hang,
+keep the `serial-N.log` files and a screenshot. Do not describe this as fixed
 without a guest-level reproduction and root-cause evidence.
 
 **G16. `halt` does not power the virtual machine off.** The Hurd shuts
 down, GNU Mach prints `Shutdown completed successfully, now in tight
 loop.` on its console, and QEMU keeps running. Waiting for QEMU to exit
 therefore always runs into the timeout. `guix_vm.sh stop` waits for that
-line in `img/guix/serial.log` instead and stops QEMU when it appears;
-this is why the declaration puts the console on the serial line
-(`console=com0`).
+line in the serial log of the running boot (`img/guix/serial-N.log`, named
+in `.serial-current`, copied to `serial.log` afterwards) and stops QEMU
+when it appears; this is why the declaration puts the console on the
+serial line (`console=com0`).
 
 **G17. Ignore the "Consider running 'guix pull'" warning.** Every
 `guix system image` prints it, because goonix is newer than its own
@@ -257,11 +353,13 @@ the SSH port, not into `img/guix/`.
 investigation, three of three guests in which a 9pfs translator had run
 stopped their SSH server on `halt` and did not reach GNU Mach's shutdown
 marker, including after `settrans -g`; five shutdowns without 9pfs were clean.
-The cause was not found. A later reference-image control with a mounted 9pfs
-translator did reach the marker, so the symptom is not universal and the
-difference is unresolved. `guix_vm.sh stop` stops QEMU after 60 seconds and
-says so. With a throw-away disk nothing is lost; with a kept state, run
-`make guix-repair` before the next `make guix-start-persist`.
+On 2026-11-15, in a clean checkout, it happened in three of three runs that
+used 9pfs: twice over TCP (mount, I/O, `settrans -g -f`, then `make
+guix-stop`) and once in the virtio-9p matrix, which passed all 24 assertions
+first. The earlier session saw some clean shutdowns after 9pfs, so it is not
+universal; its cause was not found. `guix_vm.sh stop` stops QEMU after 60 seconds, says so
+and exits nonzero. With a throw-away disk nothing is lost; with a kept
+state, run `make guix-repair` before the next `make guix-start-persist`.
 
 **G21. Start the 9P server before mounting, and wait for it.** If the
 guest connects before `9p-server.py` listens, 9pfs exits at once and every
@@ -270,67 +368,32 @@ Python can take seconds to start. Wait for its line
 `9p-server: serving … on 127.0.0.1:1564`, and if a mount already died,
 `settrans -g -f /host` and mount again.
 
-### Virtio-9p diagnostics
-
-Use the upstream `scripts/virtio_test.py` assertions through the Guix wrapper:
-`make guix-virtio-test` inside `nix develop ./nix#guix`. It builds the Guix
-`9pfs` and `virtio-9p` packages, boots a disposable guest on port 2231 with
-an optional virtio device, and runs the device, mount, I/O, teardown, and
-recreation matrix. The driver source is the existing `~/src/virtio` checkout.
-The diagnostic directory is `img/guix/virtio-test`; it must not already exist.
-On failure, retain its `serial.log` and use `scripts/guix_vm.sh mode` to query
-the QEMU monitor. `VIRTIO_ADDR=0x5` is the isolated-IRQ control; do not infer
-a Hurd boot fix from a driver or IRQ result.
-
-The pinned guest passed the 24-assertion virtio I/O matrix on 2026-11-15.
-One run's halt did not reach the Mach shutdown marker within 60 seconds;
-`guix stop` and the wrapper correctly returned failure. A later controlled run
-passed the same matrix and shut down cleanly. The earlier symptom is therefore
-intermittent, not a failure of every virtio-9p guest. The ordinary boot never
-attaches the virtio device.
-
-Set `GUIX_BASE_IMG` to an explicit base for a diagnostic variant. Relative
-paths are resolved before the wrapper links the base into its temporary
-`GUIX_DIR`. Use `VIRTIO_STORE` and `P9FS_STORE` for packages built against
-that guest's Hurd libraries; their interpreter and library closure must be
-present in the guest. The opt-in image includes its diagnostic packages for
-this reason. These packages are not boot-critical services.
-
-The opt-in `guix/hurd-upstream.scm` package and `guix/hurd64-upstream.scm`
-guest are diagnostics, not a replacement for the reference pin. The selected
-Hurd revision is `881e887bfc45e61ab08adace04faa32d1711526d`. The complete
-image is built with the pinned toolchain:
-
-```sh
-nix develop ./nix#guix -c env \
-    GUIX_DIR="$PWD/img/guix/upstream-complete" \
-    GUIX_OS="$PWD/guix/hurd64-upstream.scm" GUIX_SSH_PORT=2230 \
-    bash scripts/guix_vm.sh image
-```
-
-The declaration replaces the network service's `pfinet` path as well as the
-boot servers. The verified no-device control used the newer `pfinet`, reached
-SSH, and shut down cleanly. Its controlled virtio run passed all 24 assertions
-and shut down cleanly. These successful runs do not establish a statistical
-fix for the intermittent `pfinet` boot stall.
-
 ## Current verification limits
 
-- The pinned shell and both `hurd64` image types are verified.
-- The base image and 9pfs driver build, and both accounts accept their keys.
-- The 9pfs canary read and host-visible write are verified in a custom guest.
-- A managed 9pfs guest completed `make guix-stop` both with the translator
-  mounted and after detaching it. The older mounted-hang symptom was not
-  reproduced in those runs; its cause is still unresolved.
-- The original `pfinet` boot hang and 9pfs shutdown correlation are not
-  root-caused. No Hurd or 9pfs source fix is established by the successful
-  controls above.
-- The Debian virtio control reached login and detected the device, but did not
-  complete a successful mount matrix. The passing Guix matrix does not prove
-  that the Debian provisioning or driver control passes.
+Run on 2026-11-15 in a clean clone of the branch, goonix `630ee30` on host,
+shell and guest:
+
+- Acceptance criteria 1-7 of the plan: the image builds (only goonix and
+  configuration derivations are built) and a second build changes nothing;
+  root and peon log in with their keys, a password or the other account's key
+  is refused; a clean stop takes about 20 seconds and `make guix-status` then
+  prints `stopped`; a file survives `guix-stop`/`guix-start-persist`,
+  `guix-repair` passes and the file is gone after `guix-reset-state`; the
+  drivers image runs `9pfs 0.1.0` and its mount works in both directions.
+  `guix --version` prints `1.5.0-goonix.630ee30` on the host and in the
+  guest, and the guest's `guix describe` names the goonix commit.
+- Not fixed: the boot hang of G15 (retries recover it) and the unclean halt
+  after 9pfs of G20.
+- The Debian virtio control of `make virtio-test` is not a valid negative
+  result yet: the run that failed had just rebuilt `img/hurd.base.qcow2`
+  from the downloaded image (its prerequisites had changed), so it booted an
+  unprovisioned guest. Run `make provision` before `make virtio-test`.
+- `make guix-virtio-test` with the goonix guest: 24/24 assertions passed
+  (device at `00:05.0`), then the halt was unclean (G20) and the target
+  failed, as it should.
+- The opt-in newer-Hurd guest (`guix/hurd64-upstream.scm`) passed in the
+  earlier session; it was not rebuilt with the goonix guest.
 - Hurd startup reports `startup: shutdown: No such file or directory` when
   `/servers/shutdown` is absent. A test-only one-shot service installed that
   translator, but the subsequent stop timed out before Hurd shutdown
   notifications. That experiment was reverted and is not a verified fix.
-  After reverting it, the default guest again passed the normal start and
-  clean stop sequence.
