@@ -74,7 +74,7 @@ PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" \
     -device virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare > "$TEST_DIR/output" 2>&1
 rc=$?
 
-echo '1..12'
+echo '1..14'
 failures=0
 if (( rc != 0 )); then
     echo 'ok 1 - all synthetic boot attempts time out'
@@ -243,6 +243,55 @@ if (( stale_pointer_rc == 0 )) &&
 else
     echo 'not ok 12 - a stale serial pointer hid the preserved log'
     sed 's/^/# /' "$TEST_DIR/stale-pointer-output"
+    failures=1
+fi
+# An image built by another Guix is not the declared system: image must
+# refuse it before building anything.
+mkdir -p "$TEST_DIR/other-bin"
+cat > "$TEST_DIR/other-bin/guix" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TEST_DIR/other-guix.calls"
+[[ "${1:-}" == --version ]] && echo 'guix (GNU Guix) 1.5.0'
+exit 0
+SH
+chmod +x "$TEST_DIR/other-bin/guix"
+touch "$TEST_DIR/system.scm"
+set +e
+PATH="$TEST_DIR/bin:$PATH" GUIX="$TEST_DIR/other-bin/guix" \
+    GUIX_DIR="$TEST_DIR/image-guix" GUIX_OS="$TEST_DIR/system.scm" \
+    bash "$REPO_ROOT/scripts/guix_vm.sh" image > "$TEST_DIR/other-guix-output" 2>&1
+other_guix_rc=$?
+if (( other_guix_rc != 0 )) && grep -q 'is not goonix' "$TEST_DIR/other-guix-output" &&
+   ! grep -q '^system' "$TEST_DIR/other-guix.calls"; then
+    echo 'ok 13 - image refuses a Guix other than goonix'
+else
+    echo 'not ok 13 - image used a Guix other than goonix'
+    sed 's/^/# /' "$TEST_DIR/other-guix-output"
+    failures=1
+fi
+# A halt connection that hangs after the guest has shut down must not
+# delay stop: the serial marker ends the wait, not the SSH client.
+cat > "$TEST_DIR/bin/ssh" <<'SH'
+#!/usr/bin/env bash
+printf 'Shutdown completed successfully, now in tight loop.\n' > "$TEST_DIR/guix/serial-1.log"
+exec sleep 60
+SH
+sleep 30 &
+printf '%s\n' "$!" > "$TEST_DIR/guix/qemu.pid"
+printf '%s\n' "$!" >> "$TEST_DIR/synthetic-pids"
+printf '%s\n' "$TEST_DIR/guix/serial-1.log" > "$TEST_DIR/guix/.serial-current"
+: > "$TEST_DIR/guix/serial-1.log"
+hung_start=$SECONDS
+set +e
+PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" SSH_KEY_DIR="$TEST_DIR/keys" \
+    bash "$REPO_ROOT/scripts/guix_vm.sh" stop > "$TEST_DIR/hung-halt-output" 2>&1
+hung_rc=$?
+hung_time=$(( SECONDS - hung_start ))
+if (( hung_rc == 0 && hung_time < 10 )); then
+    echo "ok 14 - a hung halt connection does not delay stop (${hung_time} s)"
+else
+    echo "not ok 14 - stop took ${hung_time} s with a hung halt connection (rc $hung_rc)"
+    sed 's/^/# /' "$TEST_DIR/hung-halt-output"
     failures=1
 fi
 exit "$failures"

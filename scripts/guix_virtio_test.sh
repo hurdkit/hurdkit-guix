@@ -56,10 +56,24 @@ guest_start() {
     fi
 }
 
-if [[ -e "$GUIX_DIR" ]]; then
-    echo "guix-virtio-test: $GUIX_DIR already exists; choose an unused diagnostic directory" >&2
+REUSE="${REUSE:-0}"
+if [[ "$REUSE" == 1 ]]; then
+    # A failed run leaves its directory and guest for exactly this rerun.
+    [[ -d "$GUIX_DIR" ]] || {
+        echo "guix-virtio-test: REUSE=1 but $GUIX_DIR does not exist; run once without REUSE" >&2
+        exit 1
+    }
+elif [[ -e "$GUIX_DIR" ]]; then
+    echo "guix-virtio-test: $GUIX_DIR already exists; stop its guest and remove it, or rerun with REUSE=1" >&2
     exit 1
 fi
+version="$("$GUIX" --version 2>/dev/null | head -n 1)"
+[[ "${GUIX_ANY_VERSION:-0}" == 1 || "$version" == *goonix* ]] || {
+    # Driver packages built by another Guix link against libraries that
+    # the guest does not have.
+    echo "guix-virtio-test: $GUIX is not goonix ($version); run inside nix develop ./nix#guix" >&2
+    exit 1
+}
 [[ -f "$GUIX_BASE_IMG" ]] || {
     echo "guix-virtio-test: missing base image $GUIX_BASE_IMG (build it with make guix-image)" >&2
     exit 1
@@ -88,7 +102,7 @@ guix-virtio-test: FAILED; guest left running for diagnosis.
   serial: $QEMU_LOG
   monitor: $MONITOR_SOCKET
   SSH: ssh -i $SSH_KEY -p $GUIX_SSH_PORT root@$SSH_HOST
-  reuse the matrix with MODE=$MODE REUSE=1 $0
+  rerun the matrix on it: GUIX_DIR="$GUIX_DIR" GUIX_SSH_PORT="$GUIX_SSH_PORT" MODE=$MODE REUSE=1 bash $0
   stop only after diagnosis: GUIX_DIR="$GUIX_DIR" GUIX_SSH_PORT="$GUIX_SSH_PORT" bash "$SCRIPT_DIR/guix_vm.sh" stop
 EOF
         else
@@ -105,7 +119,8 @@ trap cleanup EXIT
 
 mkdir -p "$GUIX_DIR/tmp" "$SHARE"
 # This is a diagnostic image only; it never replaces img/guix/hurd64.base.qcow2.
-ln -s "$GUIX_BASE_IMG" "$GUIX_DIR/hurd64.base.qcow2"
+# A reused directory keeps the link of the run that booted its guest.
+[[ -L "$GUIX_DIR/hurd64.base.qcow2" ]] || ln -s "$GUIX_BASE_IMG" "$GUIX_DIR/hurd64.base.qcow2"
 if [[ -z "$P9FS_STORE" ]]; then
     P9FS_STORE="$($GUIX build --target=x86_64-pc-gnu -f "$REPO_ROOT/guix/9pfs.scm")"
 fi
@@ -120,7 +135,7 @@ export VIRTIO_9P_BIN="$VIRTIO_STORE/bin/virtio-9p"
 }
 printf 'from host\n' > "$SHARE/host-seed.txt"
 
-if [[ "${REUSE:-0}" == 1 ]]; then
+if [[ "$REUSE" == 1 ]]; then
     need_guest status
     GUEST_STARTED=1
 else

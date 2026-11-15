@@ -72,7 +72,7 @@ guix-reset-state:
 # Failure retains the diagnostic directory and serial log; no Debian image
 # is used. Shutdown without the Mach marker is a failed gate, even if I/O passes.
 guix-virtio-test:
-	@GUIX_DIR="$(abspath $(IMG_DIR)/guix/virtio-test)" \
+	@GUIX_DIR="$(abspath $(IMG_DIR)/guix/virtio-test)" REUSE="$(REUSE)" \
 		bash scripts/guix_virtio_test.sh
 
 # Generate the host archive-signing key if needed and trust its public half.

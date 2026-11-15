@@ -15,7 +15,7 @@
 #   run                boot in the foreground with a throw-away disk
 #   repair             check and repair the root filesystem of the kept state
 #   reset-state        delete the kept disk state
-#   mode COMMAND       send a command to the QEMU human monitor
+#   monitor COMMAND    send a command to the QEMU human monitor
 #
 # The base image is never booted: the guest always runs from a
 # copy-on-write overlay, so the base image stays as Guix built it.
@@ -75,6 +75,17 @@ die() {
 
 need() {
     command -v "$1" >/dev/null 2>&1 || die "$1 is required but not in PATH"
+}
+
+# The image has to be built by goonix, the Guix that nix/flake.lock pins:
+# another Guix (for example an upstream one installed with "guix pull")
+# evaluates a different package graph, and the image is then not the one
+# this repository declares. GUIX_ANY_VERSION=1 skips the check.
+require_goonix() {
+    local version
+    version="$("$GUIX" --version 2>/dev/null | head -n 1)"
+    [[ "${GUIX_ANY_VERSION:-0}" == 1 || "$version" == *goonix* ]] || \
+        die "$GUIX is not goonix ($version); run this inside nix develop ./nix#guix"
 }
 
 # The process ID of the running QEMU, or nothing.
@@ -177,6 +188,7 @@ new_overlay() {
 
 cmd_image() {
     need "$GUIX"; need "$QEMU_IMG"; need flock
+    require_goonix
     [[ -f "$GUIX_OS" ]] || die "system declaration not found: $GUIX_OS"
     [[ -z "$(qemu_pid)" ]] || die "the guest is running; stop it first (make guix-stop)"
     if [[ -e "$STATE_IMG" ]]; then
@@ -243,6 +255,9 @@ cmd_start() {
     # in time is stopped and tried again. Disposable retries use a new
     # overlay, since the forcibly stopped one is not a clean boot state.
     local attempt
+    # Each attempt has its own serial log; logs of an earlier start would
+    # be mistaken for this one's.
+    rm -f "$GUIX_DIR"/serial-[0-9]*.log
     for (( attempt = 1; attempt <= GUIX_BOOT_ATTEMPTS; attempt++ )); do
         # A timed-out guest may have written anywhere in its disposable
         # overlay before the forced stop. Never boot that dirty state again:
@@ -320,20 +335,24 @@ cmd_stop() {
     # the virtual machine off; GNU Mach ends in a loop after printing this
     # line on its console (the serial line, see console=com0 in
     # guix/hurd64.scm). From then on QEMU can be stopped safely.
-    local done_line="Shutdown completed successfully"
+    local done_line="Shutdown completed successfully" halt_pid
     # The SSH client may wait on its connection after halt has already
-    # stopped the guest. It is a control channel, not the shutdown gate.
+    # stopped the guest. It is a control channel, not the shutdown gate:
+    # it runs in the background, bounded, while the serial log is watched.
     timeout --signal=TERM --kill-after=2s 15s \
         ssh -i "$SSH_KEY_DIR/root_ed25519" -o IdentitiesOnly=yes \
         -o IdentityAgent=none -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
         -o ConnectTimeout=10 -o BatchMode=yes \
-        -p "$GUIX_SSH_PORT" "root@$SSH_HOST" halt >/dev/null 2>&1 || true
+        -p "$GUIX_SSH_PORT" "root@$SSH_HOST" halt >/dev/null 2>&1 &
+    halt_pid=$!
     for (( i = 0; i < 60; i++ )); do
         kill -0 "$pid" 2>/dev/null || break
         grep -a -q "$done_line" "$SERIAL_LOG" 2>/dev/null && break
         sleep 1
     done
+    kill "$halt_pid" 2>/dev/null || true
+    wait "$halt_pid" 2>/dev/null || true
     if grep -a -q "$done_line" "$SERIAL_LOG" 2>/dev/null || ! kill -0 "$pid" 2>/dev/null; then
         clean=1
         echo "guix_vm: the guest has shut down"
@@ -390,14 +409,14 @@ cmd_run() {
     qemu_command "$disk" -nographic
 }
 
-cmd_mode() {
-    (( $# >= 1 )) || die "usage: guix_vm.sh mode COMMAND"
+cmd_monitor() {
+    (( $# >= 1 )) || die "usage: guix_vm.sh monitor COMMAND"
     [[ -n "$(qemu_pid)" ]] || die "the guest is not running"
     [[ -S "$MONITOR_SOCKET" ]] || die "no monitor socket: $MONITOR_SOCKET"
     # The optional diagnostic monitor shares the upstream harness's Python
     # dependency. Ordinary build/boot/SSH/stop operations do not use it.
     need python3
-    python3 - "$MONITOR_SOCKET" "$*" <<'PY'
+    python3 -I - "$MONITOR_SOCKET" "$*" <<'PY'
 import socket, sys
 path, command = sys.argv[1:]
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -433,7 +452,7 @@ cmd_reset_state() {
 }
 
 command="${1:-}"
-[[ -n "$command" ]] || die "usage: guix_vm.sh image|start [persist] [-- QEMU-ARG...]|status|ssh USER [CMD...]|stop|screenshot [FILE]|run|repair|reset-state|mode COMMAND"
+[[ -n "$command" ]] || die "usage: guix_vm.sh image|start [persist] [-- QEMU-ARG...]|status|ssh USER [CMD...]|stop|screenshot [FILE]|run|repair|reset-state|monitor COMMAND"
 shift
 case "$command" in
     image)       cmd_image "$@" ;;
@@ -457,6 +476,6 @@ case "$command" in
     run)         cmd_run "$@" ;;
     repair)      cmd_repair "$@" ;;
     reset-state) cmd_reset_state "$@" ;;
-    mode)        cmd_mode "$@" ;;
+    monitor)     cmd_monitor "$@" ;;
     *)           die "unknown command: $command" ;;
 esac
