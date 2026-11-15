@@ -1,0 +1,80 @@
+Keep rumpdisk compatible with the goonix rumpkernel.
+Drop NVMe support absent from the pinned rumpkernel and retain its legacy IDE probe.
+diff --git a/rumpdisk/Makefile b/rumpdisk/Makefile
+index 7b5947b8..de33c65d 100644
+--- a/rumpdisk/Makefile
++++ b/rumpdisk/Makefile
+@@ -1,5 +1,5 @@
+ #
+-#   Copyright (C) 2019, 2023, 2026 Free Software Foundation, Inc.
++#   Copyright (C) 2019, 2023 Free Software Foundation, Inc.
+ #
+ #   This program is free software; you can redistribute it and/or
+ #   modify it under the terms of the GNU General Public License as
+@@ -16,7 +16,7 @@
+ #   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ 
+ RUMPLIBS=rump rumpuser rumpdev rumpdev_disk rumpdev_pci rumpvfs
+-RUMPSATA=rumpdev_ahcisata rumpdev_piixide rumpdev_ata rumpdev_nvme rumpdev_ld_nvme rumpdev_ld
++RUMPSATA=rumpdev_ahcisata rumpdev_piixide rumpdev_ata
+ RUMPUSB=rumpdev_usb rumpdev_pci_usbhc rumpdev_umass rumpdev_scsipi
+ RUMPEXTRA=rumpdev_scsipi
+ 
+diff --git a/rumpdisk/block-rump.c b/rumpdisk/block-rump.c
+index 35fb00e9..483762fa 100644
+--- a/rumpdisk/block-rump.c
++++ b/rumpdisk/block-rump.c
+@@ -1,7 +1,7 @@
+ /*
+  * Rump block driver support
+  *
+- * Copyright (C) 2019, 2026 Free Software Foundation
++ * Copyright (C) 2019 Free Software Foundation
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -57,7 +57,7 @@
+ #endif
+ 
+ #ifdef _RUMP_SATA
+-#define RUMP_TYPE_STRING "rump SATA/IDE/NVMe"
++#define RUMP_TYPE_STRING "rump SATA/IDE"
+ #else
+ #define RUMP_TYPE_STRING "rump USB"
+ #endif
+@@ -132,7 +132,6 @@ is_disk_device (const char *name)
+   const char *allowed_devs[] = {
+ #ifdef _RUMP_SATA
+     "wd",
+-    "ld",
+ #else
+     "sd",
+ #endif
+@@ -179,19 +178,6 @@ rumpdisk_device_init (void)
+       device_t device;
+ 
+ #ifdef _RUMP_SATA
+-      if (! device_open (device_master, D_READ, "ld0", &device)
+-       || ! device_open (device_master, D_READ, "ld1", &device)
+-       || ! device_open (device_master, D_READ, "ld3", &device)
+-       || ! device_open (device_master, D_READ, "ld2", &device))
+-    {
+-      device_close (device);
+-      mach_port_deallocate (mach_task_self (), device);
+-      fprintf(stderr, "Kernel is already driving a Logic Disk device, skipping probing disks\n");
+-      fflush(stderr);
+-      disabled = 1;
+-      return;
+-    }
+-#if 0
+       if (! device_open (device_master, D_READ, "hd0", &device)
+        || ! device_open (device_master, D_READ, "hd1", &device)
+        || ! device_open (device_master, D_READ, "hd3", &device)
+@@ -204,7 +190,6 @@ rumpdisk_device_init (void)
+ 	  disabled = 1;
+ 	  return;
+ 	}
+-#endif
+ 
+       if (! device_open (device_master, D_READ, "sd0", &device)
+        || ! device_open (device_master, D_READ, "sd1", &device)

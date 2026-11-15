@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# TAP regression test: a disposable boot retry must not reuse guest writes.
+# QEMU and SSH are synthetic; no real guest, base image, or host service is used.
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEST_DIR="$(mktemp -d)"
+export TEST_DIR
+cleanup() {
+    if [[ -f "$TEST_DIR/synthetic-pids" ]]; then
+        while read -r pid; do kill "$pid" 2>/dev/null || true; done < "$TEST_DIR/synthetic-pids"
+    fi
+    [[ "${DEBUG_GUIX_RETRY:-0}" == 1 ]] && cat "$TEST_DIR/output" 2>/dev/null
+    [[ "${DEBUG_GUIX_RETRY:-0}" == 1 ]] || rm -rf "$TEST_DIR"
+}
+trap cleanup EXIT
+mkdir -p "$TEST_DIR/bin" "$TEST_DIR/guix" "$TEST_DIR/keys"
+printf 'fake private key\n' > "$TEST_DIR/keys/root_ed25519"
+chmod 600 "$TEST_DIR/keys/root_ed25519"
+qemu-img create -q -f qcow2 "$TEST_DIR/guix/hurd64.base.qcow2" 16M
+
+for tool in qemu-img sha256sum; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "1..0 # SKIP $tool is not installed"
+        exit 0
+    fi
+done
+REAL_QEMU_IMG="$(command -v qemu-img)"
+export REAL_QEMU_IMG
+
+cat > "$TEST_DIR/bin/qemu-img" <<'SH'
+#!/usr/bin/env bash
+set -e
+"$REAL_QEMU_IMG" "$@"
+if [[ "${1:-}" == create ]]; then
+    eval 'overlay=${!#}'
+    sha256sum "$overlay" | cut -d' ' -f1 >> "$TEST_DIR/created-hashes"
+fi
+SH
+cat > "$TEST_DIR/bin/qemu-system-x86_64" <<'SH'
+#!/usr/bin/env bash
+set -u
+attempt=$(( $(wc -l < "$TEST_DIR/boots" 2>/dev/null || echo 0) + 1 ))
+printf '%s\n' -- "$@" > "$TEST_DIR/qemu-$attempt.argv"
+disk= pidfile=
+while (( $# )); do
+    case "$1" in
+        -hda) disk="$2"; shift 2 ;;
+        -pidfile) pidfile="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+actual="$(sha256sum "$disk" | cut -d' ' -f1)"
+created="$(tail -n 1 "$TEST_DIR/created-hashes")"
+printf 'attempt=%s actual=%s created=%s\n' "$attempt" "$actual" "$created" >> "$TEST_DIR/boots"
+# A real timed-out guest may have written anywhere in its overlay. The
+# checksum catches that before this synthetic write dirties it further.
+printf 'guest-write-from-attempt-%s\n' "$attempt" >> "$disk"
+# A separate live process acts as QEMU for the pid liveness check.
+setsid sleep 120 < /dev/null > /dev/null 2>&1 &
+echo "$!" > "$pidfile"
+echo "$!" >> "$TEST_DIR/synthetic-pids"
+SH
+cat > "$TEST_DIR/bin/ssh" <<'SH'
+#!/usr/bin/env bash
+exit 255
+SH
+chmod +x "$TEST_DIR/bin/"*
+
+PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" \
+    SSH_KEY_DIR="$TEST_DIR/keys" GUIX_BOOT_TIMEOUT=1 GUIX_BOOT_ATTEMPTS=2 \
+    bash "$REPO_ROOT/scripts/guix_vm.sh" start -- \
+    -fsdev 'local,id=hostshare,path=/tmp/a path,security_model=none' \
+    -device virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare > "$TEST_DIR/output" 2>&1
+rc=$?
+
+echo '1..10'
+failures=0
+if (( rc != 0 )); then
+    echo 'ok 1 - all synthetic boot attempts time out'
+else
+    echo 'not ok 1 - synthetic SSH failure unexpectedly succeeded'
+    failures=1
+fi
+if [[ "$(wc -l < "$TEST_DIR/boots")" == 2 ]]; then
+    echo 'ok 2 - exactly two boot attempts run'
+else
+    echo 'not ok 2 - expected two boot attempts'
+    cat "$TEST_DIR/boots"
+    failures=1
+fi
+if awk '{ actual=substr($2, 8); created=substr($3, 9); if (actual != created) exit 1 }' "$TEST_DIR/boots"; then
+    echo 'ok 3 - each boot starts from its newly created overlay'
+else
+    echo 'not ok 3 - a boot reused writes from the previous attempt'
+    sed 's/^/# /' "$TEST_DIR/boots"
+    failures=1
+fi
+if grep -q 'checking the kept state' "$TEST_DIR/output"; then
+    echo 'not ok 4 - disposable retry incorrectly repairs persistent state'
+    failures=1
+else
+    echo 'ok 4 - disposable retry does not run persistent repair'
+fi
+# A separately sourced command-construction test: arrays cannot be exported
+# into another Bash process as an ordinary environment variable.
+args_dir="$TEST_DIR/qemu-args"
+mkdir "$args_dir"
+cat > "$TEST_DIR/bin/record-qemu" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' -- "$@"
+SH
+chmod +x "$TEST_DIR/bin/record-qemu"
+PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" QEMU_SYSTEM="$TEST_DIR/bin/record-qemu" \
+    bash -c 'repo="$1"; source <(sed "/^command=/,\$d" "$repo/scripts/guix_vm.sh"); GUIX_VM_EXTRA_ARGS=(-fsdev local,id=hostshare,path="/tmp/a path",security_model=none -device virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare); qemu_command test.qcow2 -display none' \
+    _ "$REPO_ROOT" > "$args_dir/args"
+if [[ "$(sed -n '/^-fsdev$/{n;p;}' "$args_dir/args")" == 'local,id=hostshare,path=/tmp/a path,security_model=none' ]] &&
+   [[ "$(sed -n '/^-device$/{n;p;}' "$args_dir/args" | tail -n 1)" == 'virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare' ]]; then
+    echo 'ok 5 - complete virtio arguments survive the guest-start boundary'
+else
+    echo 'not ok 5 - virtio arguments were split or lost'
+    sed 's/^/# /' "$args_dir/args"
+    failures=1
+fi
+if [[ "$(sed -n '/^-hda$/{n;p;}' "$args_dir/args")" == test.qcow2 ]] &&
+   [[ "$(sed -n '/^-display$/{n;p;}' "$args_dir/args")" == none ]]; then
+    echo 'ok 6 - disk and caller options survive argument forwarding'
+else
+    echo 'not ok 6 - disk or caller options were lost'
+    sed 's/^/# /' "$args_dir/args"
+    failures=1
+fi
+if [[ "$(sed -n '/^-fsdev$/{n;p;}' "$TEST_DIR/qemu-1.argv")" == 'local,id=hostshare,path=/tmp/a path,security_model=none' ]] &&
+   [[ "$(sed -n '/^-device$/{n;p;}' "$TEST_DIR/qemu-1.argv" | tail -n 1)" == 'virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare' ]]; then
+    echo 'ok 7 - the start entry point preserves complete virtio arguments'
+else
+    echo 'not ok 7 - the start entry point dropped or split virtio arguments'
+    sed 's/^/# /' "$TEST_DIR/qemu-1.argv"
+    failures=1
+fi
+# Stop must not silently turn a missing shutdown marker into a clean exit.
+stop_dir="$TEST_DIR/stop"
+mkdir "$stop_dir"
+sleep 90 &
+stop_pid=$!
+printf '%s\n' "$stop_pid" > "$TEST_DIR/guix/qemu.pid"
+set +e
+GUIX_DIR="$TEST_DIR/guix" SSH_KEY_DIR="$TEST_DIR/keys" \
+    bash -c 'repo="$1"; source <(sed "/^command=/,\$d" "$repo/scripts/guix_vm.sh"); SERIAL_LOG="$2/no-marker.log"; : > "$SERIAL_LOG"; guest_ssh() { return 0; }; cmd_stop' _ "$REPO_ROOT" "$stop_dir" > "$stop_dir/output" 2>&1
+stop_rc=$?
+set -e
+kill "$stop_pid" 2>/dev/null || true
+if (( stop_rc != 0 )) && grep -q 'did not shut down' "$stop_dir/output"; then
+    echo 'ok 8 - a forced stop without the shutdown marker fails'
+else
+    echo 'not ok 8 - missing shutdown marker was reported as success'
+    sed 's/^/# /' "$stop_dir/output"
+    failures=1
+fi
+# Persistent mode accepts the same optional QEMU arguments. A fake QEMU
+# failure avoids entering the real offline filesystem repair chain.
+cat > "$TEST_DIR/bin/qemu-system-x86_64" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' -- "$@" > "$TEST_DIR/persist.argv"
+exit 1
+SH
+rm -f "$TEST_DIR/guix/qemu.pid"
+set +e
+PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" \
+    SSH_KEY_DIR="$TEST_DIR/keys" GUIX_BOOT_TIMEOUT=1 GUIX_BOOT_ATTEMPTS=1 \
+    bash "$REPO_ROOT/scripts/guix_vm.sh" start persist -- \
+    -smp 4 -device virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare \
+    > "$TEST_DIR/persist-output" 2>&1
+persist_rc=$?
+set -e
+if (( persist_rc != 0 )) &&
+   [[ "$(sed -n '/^-smp$/{n;p;}' "$TEST_DIR/persist.argv")" == 4 ]]; then
+    echo 'ok 9 - persistent mode forwards QEMU options'
+else
+    echo 'not ok 9 - persistent mode dropped its QEMU options'
+    sed 's/^/# /' "$TEST_DIR/persist-output"
+    failures=1
+fi
+# A halt command that loses its SSH connection must not block stop forever.
+# Fake ssh exits immediately but records its options; a real blocked client
+# is terminated by the timeout wrapper.
+cat > "$TEST_DIR/bin/ssh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' -- "$@" > "$TEST_DIR/halt-ssh.argv"
+printf 'Shutdown completed successfully, now in tight loop.\n' > "$TEST_DIR/guix/serial.log"
+exit 255
+SH
+sleep 30 &
+printf '%s\n' "$!" > "$TEST_DIR/guix/qemu.pid"
+printf '%s\n' "$!" >> "$TEST_DIR/synthetic-pids"
+PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" SSH_KEY_DIR="$TEST_DIR/keys" \
+    bash "$REPO_ROOT/scripts/guix_vm.sh" stop > "$TEST_DIR/halt-output" 2>&1 || true
+if grep -Fq 'timeout --signal=TERM --kill-after=2s 15s' scripts/guix_vm.sh &&
+   grep -Fxq halt "$TEST_DIR/halt-ssh.argv"; then
+    echo 'ok 10 - the halt SSH command has a finite timeout'
+else
+    echo 'not ok 10 - halt SSH command lacks a finite timeout'
+    sed 's/^/# /' "$TEST_DIR/halt-output" 2>/dev/null
+    sed 's/^/# /' "$TEST_DIR/halt-ssh.argv" 2>/dev/null
+    failures=1
+fi
+exit "$failures"

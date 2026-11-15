@@ -1,0 +1,21 @@
+Support BPF_MOD and BPF_XOR with older gnumach headers.
+The values match gnumach 749d77d9 include/device/bpf.h.
+diff --git a/libbpf/bpf_impl.h b/libbpf/bpf_impl.h
+index fb0fb490..d575c5fe 100644
+--- a/libbpf/bpf_impl.h
++++ b/libbpf/bpf_impl.h
+@@ -40,6 +40,14 @@
+ 
+ #include <device/bpf.h>
+ 
++/* gnumach 749d77d9 added these opcodes. Keep building against older headers. */
++#ifndef BPF_MOD
++#define BPF_MOD 0x90
++#endif
++#ifndef BPF_XOR
++#define BPF_XOR 0xa0
++#endif
++
+ #include "queue.h"
+ 
+ typedef struct

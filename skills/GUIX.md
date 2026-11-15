@@ -265,6 +265,32 @@ Python can take seconds to start. Wait for its line
 `9p-server: serving … on 127.0.0.1:1564`, and if a mount already died,
 `settrans -g -f /host` and mount again.
 
+### Virtio-9p diagnostics
+
+Use the upstream `scripts/virtio_test.py` assertions through the Guix wrapper:
+`make guix-virtio-test` inside `nix develop ./nix#guix`. It builds the Guix
+`9pfs` and `virtio-9p` packages, boots a disposable guest on port 2231 with
+an optional virtio device, and runs the device, mount, I/O, teardown, and
+recreation matrix. The driver source is the existing `~/src/virtio` checkout.
+The diagnostic directory is `img/guix/virtio-test`; it must not already exist.
+On failure, retain its `serial.log` and use `scripts/guix_vm.sh mode` to query
+the QEMU monitor. `VIRTIO_ADDR=0x5` is the isolated-IRQ control; do not infer
+a Hurd boot fix from a driver or IRQ result.
+
+The pinned guest passed the 24-assertion virtio I/O matrix on 2026-11-15.
+Its subsequent halt did not reach the Mach shutdown marker within 60 seconds.
+`guix stop` and the wrapper return failure for that forced stop. This is an
+unresolved shutdown failure, not a passing lifecycle gate. The ordinary boot
+never attaches the virtio device.
+
+The opt-in `guix/hurd-upstream.scm` package and `guix/hurd64-upstream.scm`
+guest are diagnostics, not a replacement for the reference pin. An earlier
+image built and booted with newer Hurd boot servers, but still launched the
+old `pfinet`. The revised declaration changes the network service to use the
+newer package; its full image and guest verification are not yet complete.
+Do not claim that the pfinet or ext2fs commits fix the observed stalls until
+that controlled comparison has run.
+
 ## Current verification limits
 
 - The pinned shell and both `hurd64` image types are verified.

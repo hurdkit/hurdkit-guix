@@ -24,7 +24,7 @@ GUIX_VM := env GUIX_OS="$(abspath $(GUIX_OS))" \
 
 .PHONY: guix-image guix-start guix-start-persist guix-status guix-ssh \
 	guix-ssh-peon guix-stop guix-screenshot guix-run guix-repair \
-	guix-reset-state guix-authorize-host
+	guix-reset-state guix-authorize-host guix-virtio-test
 
 # Build guix/hurd64.scm into img/guix/hurd64.base.qcow2
 guix-image:
@@ -66,6 +66,14 @@ guix-repair:
 # Delete the kept state
 guix-reset-state:
 	@$(GUIX_VM) reset-state
+
+# Run the upstream virtio-9p matrix in a separate disposable Guix guest.
+# This needs the pinned goonix shell and the local ~/src/virtio checkout.
+# Failure retains the diagnostic directory and serial log; no Debian image
+# is used. Shutdown without the Mach marker is a failed gate, even if I/O passes.
+guix-virtio-test:
+	@GUIX_DIR="$(abspath $(IMG_DIR)/guix/virtio-test)" \
+		bash scripts/guix_virtio_test.sh
 
 # Generate the host archive-signing key if needed and trust its public half.
 # SUDO=... is needed on NixOS when /run/wrappers/bin is not in PATH.

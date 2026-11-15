@@ -5,8 +5,9 @@
 # Usage: guix_vm.sh <command> [arguments]
 #
 #   image              build the declared system into img/guix/hurd64.base.qcow2
-#   start [persist]    boot the guest in the background and wait for SSH;
-#                      with "persist" its disk state is kept between runs
+#   start [persist] [-- QEMU-ARG...]
+#                      boot in the background and wait for SSH; with
+#                      "persist" its disk state is kept between runs
 #   status             say whether the guest runs and answers on SSH
 #   ssh USER [CMD...]  run a command in the guest (a login shell without CMD)
 #   stop               shut the guest down (halt, then stop QEMU)
@@ -14,6 +15,7 @@
 #   run                boot in the foreground with a throw-away disk
 #   repair             check and repair the root filesystem of the kept state
 #   reset-state        delete the kept disk state
+#   mode COMMAND       send a command to the QEMU human monitor
 #
 # The base image is never booted: the guest always runs from a
 # copy-on-write overlay, so the base image stays as Guix built it.
@@ -36,6 +38,10 @@ SSH_KEY_DIR="${SSH_KEY_DIR:-$REPO_ROOT/img/keys}"
 SSH_HOST="${SSH_HOST:-127.0.0.1}"
 GUIX_SSH_PORT="${GUIX_SSH_PORT:-2223}"
 GUIX_MEMORY="${GUIX_MEMORY:-2048}"
+# Optional QEMU arguments for "start", supplied after "--". Positional
+# parameters preserve spaces in paths and options across script boundaries.
+# Bash arrays cannot be exported into a child script.
+declare -a GUIX_VM_EXTRA_ARGS=()
 QEMU_SYSTEM="${QEMU_SYSTEM:-qemu-system-x86_64}"
 QEMU_IMG="${QEMU_IMG:-qemu-img}"
 # How long one boot may take until SSH answers, and how often a boot that
@@ -43,7 +49,6 @@ QEMU_IMG="${QEMU_IMG:-qemu-img}"
 # minutes; raise the timeout then.
 GUIX_BOOT_TIMEOUT="${GUIX_BOOT_TIMEOUT:-180}"
 GUIX_BOOT_ATTEMPTS="${GUIX_BOOT_ATTEMPTS:-3}"
-
 BASE_IMG="$GUIX_DIR/hurd64.base.qcow2"
 # A symlink into /gnu/store. It is a garbage collector root: as long as it
 # exists, "guix gc" does not delete the image that Guix built.
@@ -135,7 +140,18 @@ kill_qemu() {
 
 qemu_command() {
     local disk="$1"; shift
-    local -a accel=()
+    local -a accel=() extra=()
+    if declare -p GUIX_VM_EXTRA_ARGS >/dev/null 2>&1; then
+        extra=("${GUIX_VM_EXTRA_ARGS[@]}")
+    fi
+    local arg
+    for arg in "${extra[@]}"; do
+        case "$arg" in
+            -hda|-pidfile|-monitor|-serial|-netdev|-daemonize)
+                die "QEMU option $arg is managed by guix_vm.sh; do not override it"
+                ;;
+        esac
+    done
     if [[ -r /dev/kvm && -w /dev/kvm ]]; then
         accel=(-enable-kvm)
     else
@@ -147,7 +163,7 @@ qemu_command() {
     "$QEMU_SYSTEM" -M q35 "${accel[@]}" -m "$GUIX_MEMORY" \
         -device e1000,netdev=net0 \
         -netdev "user,id=net0,hostfwd=tcp:${SSH_HOST}:${GUIX_SSH_PORT}-:${GUEST_SSH_PORT}" \
-        -hda "$disk" "$@"
+        -hda "$disk" "${extra[@]}" "$@"
 }
 
 new_overlay() {
@@ -212,7 +228,6 @@ cmd_start() {
     case "$mode" in
         "")
             disk="$RUN_IMG"
-            new_overlay "$disk"
             ;;
         persist)
             disk="$STATE_IMG"
@@ -224,12 +239,21 @@ cmd_start() {
     esac
     # The 64-bit Hurd sometimes hangs at boot: the TCP/IP server (pfinet)
     # never finishes starting, shepherd waits for it forever with the
-    # guest idle, and sshd never starts. A second boot of the same disk
-    # works. So a boot that does not answer on SSH in time is stopped and
-    # tried again.
+    # guest idle, and sshd never starts. A boot that does not answer on SSH
+    # in time is stopped and tried again. Disposable retries use a new
+    # overlay, since the forcibly stopped one is not a clean boot state.
     local attempt
     for (( attempt = 1; attempt <= GUIX_BOOT_ATTEMPTS; attempt++ )); do
+        # A timed-out guest may have written anywhere in its disposable
+        # overlay before the forced stop. Never boot that dirty state again:
+        # an unclean ext2 filesystem can then fail during early boot.
+        # Persistent state is deliberately retained and repaired below.
+        if [[ "$mode" != persist ]]; then
+            new_overlay "$disk"
+        fi
+        SERIAL_LOG="$GUIX_DIR/serial-$attempt.log"
         : > "$SERIAL_LOG"
+        cp -f "$SERIAL_LOG" "$GUIX_DIR/serial.log"
         rm -f "$MONITOR_SOCKET"
         # The monitor socket lets the host talk to QEMU itself, for example
         # to take a screenshot of the VGA console (make guix-screenshot).
@@ -277,7 +301,7 @@ cmd_ssh() {
 }
 
 cmd_stop() {
-    local pid i
+    local pid i clean=0
     pid="$(qemu_pid)"
     if [[ -z "$pid" ]]; then
         echo "guix_vm: the guest is not running"
@@ -290,21 +314,33 @@ cmd_stop() {
     # line on its console (the serial line, see console=com0 in
     # guix/hurd64.scm). From then on QEMU can be stopped safely.
     local done_line="Shutdown completed successfully"
-    guest_ssh -b root halt >/dev/null 2>&1 || true
+    # The SSH client may wait on its connection after halt has already
+    # stopped the guest. It is a control channel, not the shutdown gate.
+    timeout --signal=TERM --kill-after=2s 15s \
+        ssh -i "$SSH_KEY_DIR/root_ed25519" -o IdentitiesOnly=yes \
+        -o IdentityAgent=none -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+        -o ConnectTimeout=10 -o BatchMode=yes \
+        -p "$GUIX_SSH_PORT" "root@$SSH_HOST" halt >/dev/null 2>&1 || true
     for (( i = 0; i < 60; i++ )); do
         kill -0 "$pid" 2>/dev/null || break
         grep -a -q "$done_line" "$SERIAL_LOG" 2>/dev/null && break
         sleep 1
     done
     if grep -a -q "$done_line" "$SERIAL_LOG" 2>/dev/null || ! kill -0 "$pid" 2>/dev/null; then
+        clean=1
         echo "guix_vm: the guest has shut down"
     else
         echo "guix_vm: the guest did not shut down within 60 s; stopping QEMU anyway" >&2
         echo "guix_vm: run make guix-repair before the next persistent boot" >&2
     fi
     kill_qemu "$pid"
+    if [[ "$SERIAL_LOG" != "$GUIX_DIR/serial.log" && -f "$SERIAL_LOG" ]]; then
+        cp -f "$SERIAL_LOG" "$GUIX_DIR/serial.log"
+    fi
     rm -f "$RUN_IMG"
     echo "guix_vm: stopped"
+    (( clean ))
 }
 
 cmd_screenshot() {
@@ -347,6 +383,36 @@ cmd_run() {
     qemu_command "$disk" -nographic
 }
 
+cmd_mode() {
+    (( $# >= 1 )) || die "usage: guix_vm.sh mode COMMAND"
+    [[ -n "$(qemu_pid)" ]] || die "the guest is not running"
+    [[ -S "$MONITOR_SOCKET" ]] || die "no monitor socket: $MONITOR_SOCKET"
+    # The optional diagnostic monitor shares the upstream harness's Python
+    # dependency. Ordinary build/boot/SSH/stop operations do not use it.
+    need python3
+    python3 - "$MONITOR_SOCKET" "$*" <<'PY'
+import socket, sys
+path, command = sys.argv[1:]
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(3)
+s.connect(path)
+try:
+    s.recv(65536)
+except TimeoutError:
+    pass
+s.sendall((command + "\n").encode())
+while True:
+    try:
+        data = s.recv(65536)
+    except TimeoutError:
+        break
+    if not data:
+        break
+    sys.stdout.write(data.decode(errors="replace"))
+s.close()
+PY
+}
+
 cmd_repair() {
     [[ -z "$(qemu_pid)" ]] || die "the guest is running; stop it first (make guix-stop)"
     [[ -f "$STATE_IMG" ]] || die "there is no kept state to repair ($STATE_IMG)"
@@ -360,11 +426,23 @@ cmd_reset_state() {
 }
 
 command="${1:-}"
-[[ -n "$command" ]] || die "usage: guix_vm.sh image|start [persist]|status|ssh USER [CMD...]|stop|screenshot [FILE]|run|repair|reset-state"
+[[ -n "$command" ]] || die "usage: guix_vm.sh image|start [persist] [-- QEMU-ARG...]|status|ssh USER [CMD...]|stop|screenshot [FILE]|run|repair|reset-state|mode COMMAND"
 shift
 case "$command" in
     image)       cmd_image "$@" ;;
-    start)       cmd_start "$@" ;;
+    start)
+        start_mode=""
+        if [[ "${1:-}" == persist ]]; then
+            start_mode=persist
+            shift
+        fi
+        if [[ "${1:-}" == -- ]]; then
+            shift
+            GUIX_VM_EXTRA_ARGS=("$@")
+            set --
+        fi
+        cmd_start "$start_mode" "$@"
+        ;;
     status)      cmd_status "$@" ;;
     ssh)         cmd_ssh "$@" ;;
     stop)        cmd_stop "$@" ;;
@@ -372,5 +450,6 @@ case "$command" in
     run)         cmd_run "$@" ;;
     repair)      cmd_repair "$@" ;;
     reset-state) cmd_reset_state "$@" ;;
+    mode)        cmd_mode "$@" ;;
     *)           die "unknown command: $command" ;;
 esac
