@@ -4,6 +4,10 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEST_DIR"' EXIT
+# Keep the QEMU monitor and QMP sockets of a guest that may be running
+# (they live in XDG_RUNTIME_DIR, named after the SSH port) out of reach.
+export XDG_RUNTIME_DIR="$TEST_DIR/run"
+mkdir -p "$XDG_RUNTIME_DIR"
 mkdir "$TEST_DIR/bin" "$TEST_DIR/guest"
 cat > "$TEST_DIR/bin/ssh" <<'SH'
 #!/usr/bin/env bash

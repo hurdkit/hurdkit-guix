@@ -9,17 +9,17 @@ guix_qemu_options_die() {
 }
 
 guix_qemu_render_node() {
-    local gpu="${1:-${GPU:-}}" driver node device
+    local gpu="${1:-${GUIX_HOST_GPU:-}}" driver node device
     case "$gpu" in
         amd) driver=amdgpu ;;
         nvidia) driver=nvidia ;;
-        *) guix_qemu_options_die "GPU must be amd or nvidia for egl-headless (got '$gpu')" ; return 1 ;;
+        *) guix_qemu_options_die "GUIX_HOST_GPU must be amd or nvidia for egl-headless (got '$gpu')" ; return 1 ;;
     esac
-    local sysfs="${GPU_SYSFS_DIR:-/sys/class/drm}"
+    local sysfs="${GUIX_DRM_SYSFS:-/sys/class/drm}"
     for device in "$sysfs"/renderD*; do
         [[ -e "$device/device/driver" ]] || continue
         if [[ "$(basename "$(readlink -f "$device/device/driver")")" == "$driver" ]]; then
-            node="/dev/dri/$(basename "$device")"
+            node="${GUIX_DRI_DIR:-/dev/dri}/$(basename "$device")"
             [[ -r "$node" ]] || guix_qemu_options_die "$node is not readable"
             printf '%s\n' "$node"
             return 0
@@ -35,7 +35,7 @@ guix_qemu_host_vk_device() {
         nvidia) driver=nvidia ;;
         *) return 1 ;;
     esac
-    for device in "${GPU_SYSFS_DIR:-/sys/class/drm}"/renderD*/device; do
+    for device in "${GUIX_DRM_SYSFS:-/sys/class/drm}"/renderD*/device; do
         [[ -e "$device/driver" ]] || continue
         [[ "$(basename "$(readlink -f "$device/driver")")" == "$driver" ]] || continue
         vendor="$(< "$device/vendor")"
@@ -52,35 +52,35 @@ guix_qemu_options() {
     GUIX_QEMU_OPTIONS=()
     GUIX_QEMU_DISPLAY_OPTIONS=()
     local device_options=",id=gpu0"
-    local selected_gpu="${GPU:-}"
-    if [[ "$gpu" == venus && -n "$selected_gpu" && -z "${GPU_VK_DEVICE:-}" ]]; then
-        GPU_VK_DEVICE="$(guix_qemu_host_vk_device "$selected_gpu")" || {
-            guix_qemu_options_die "no Vulkan PCI ID found for GPU=$selected_gpu"
+    local selected_gpu="${GUIX_HOST_GPU:-}"
+    if [[ "$gpu" == venus && -n "$selected_gpu" && -z "${GUIX_VK_DEVICE:-}" ]]; then
+        GUIX_VK_DEVICE="$(guix_qemu_host_vk_device "$selected_gpu")" || {
+            guix_qemu_options_die "no Vulkan PCI ID found for GUIX_HOST_GPU=$selected_gpu"
             return 1
         }
     fi
-    if [[ -n "${GPU_VK_DEVICE:-}" ]]; then
+    if [[ -n "${GUIX_VK_DEVICE:-}" ]]; then
         [[ "$gpu" == venus ]] || {
-            guix_qemu_options_die "GPU_VK_DEVICE requires GUIX_GPU=venus"
+            guix_qemu_options_die "GUIX_VK_DEVICE requires GUIX_GPU=venus"
             return 1
         }
-        [[ "$GPU_VK_DEVICE" =~ ^[[:xdigit:]]{4}:[[:xdigit:]]{4}$ ]] || {
-            guix_qemu_options_die "GPU_VK_DEVICE must be a PCI vendor:device pair"
+        [[ "$GUIX_VK_DEVICE" =~ ^[[:xdigit:]]{4}:[[:xdigit:]]{4}$ ]] || {
+            guix_qemu_options_die "GUIX_VK_DEVICE must be a PCI vendor:device pair"
             return 1
         }
-        export MESA_VK_DEVICE_SELECT="$GPU_VK_DEVICE"
+        export MESA_VK_DEVICE_SELECT="$GUIX_VK_DEVICE"
         local icd_name icd_file
         case "$selected_gpu" in
             amd) icd_name=radeon_icd.x86_64.json ;;
             nvidia) icd_name=nvidia_icd.json ;;
             *) icd_name= ;;
         esac
-        icd_file="${GPU_VK_ICD_FILE:-${VK_DRIVER_DIR:-/run/opengl-driver/share/vulkan/icd.d}/$icd_name}"
+        icd_file="${GUIX_VK_ICD_FILE:-${GUIX_VK_DRIVER_DIR:-/run/opengl-driver/share/vulkan/icd.d}/$icd_name}"
         if [[ -n "$icd_name" && -f "$icd_file" ]]; then
             export VK_DRIVER_FILES="$icd_file"
             echo "guix_vm: Venus host ICD $VK_DRIVER_FILES" >&2
         elif [[ "$gpu" == venus ]]; then
-            guix_qemu_options_die "no host Vulkan ICD for GPU=$selected_gpu at $icd_file"
+            guix_qemu_options_die "no host Vulkan ICD for GUIX_HOST_GPU=$selected_gpu at $icd_file"
             return 1
         fi
     fi
@@ -107,7 +107,8 @@ guix_qemu_options() {
             ;;
         *) guix_qemu_options_die "unknown GUIX_DISPLAY '$display' (use none, egl-headless or gtk)" ; return 1 ;;
     esac
-    GUIX_QEMU_OPTIONS+=(-smp "${GUIX_CPUS:-4}" -qmp "unix:$qmp_socket,server=on,wait=off")
+    [[ -z "${GUIX_CPUS:-}" ]] || GUIX_QEMU_OPTIONS+=(-smp "$GUIX_CPUS")
+    GUIX_QEMU_OPTIONS+=(-qmp "unix:$qmp_socket,server=on,wait=off")
     if [[ -n "${GUIX_TRACE:-}" ]]; then
         local trace_file="${GUIX_TRACE_FILE:-$GUIX_DIR/virtio-gpu.trace}"
         GUIX_QEMU_OPTIONS+=(-trace "${GUIX_TRACE},file=$trace_file")

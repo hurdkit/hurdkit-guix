@@ -16,17 +16,21 @@
 (define %goonix
   (load "goonix.scm"))
 
+;; The host's archive signing key, if it has one (make guix-authorize-host
+;; creates it). The guest trusts it, so "guix copy" from the host works.
+(define %host-signing-key "/etc/guix/signing-key.pub")
+
 (define %guix-services
   (modify-services %base-services+qemu-networking/hurd
     (guix-service-type
      config => (guix-configuration
                 (inherit config)
                 (guix %goonix)
-                ;; Only the public half is in the repository. The matching
-                ;; private half is /etc/guix/signing-key.sec on the host.
                 (authorized-keys
-                 (cons (local-file "host-signing-key.pub")
-                       (guix-configuration-authorized-keys config)))))))
+                 (if (file-exists? %host-signing-key)
+                     (cons (local-file %host-signing-key "host-signing-key.pub")
+                           (guix-configuration-authorized-keys config))
+                     (guix-configuration-authorized-keys config)))))))
 
 (operating-system
   (inherit %hurd-default-operating-system)

@@ -2,7 +2,7 @@
 # Dimensions, colour-region and pixel-difference checks for binary PPM files.
 proc fail {message} {puts stderr "ppm_check: $message"; exit 1}
 proc usage {} {
-    fail {usage: ppm_check.tcl dimensions FILE | region FILE X Y WIDTH HEIGHT RRGGBB MIN_PERCENT [TOLERANCE] | differs FILE REFERENCE MAX_PERCENT}
+    fail {usage: ppm_check.tcl dimensions FILE | region FILE X Y WIDTH HEIGHT RRGGBB MIN_PERCENT [TOLERANCE] | differs FILE REFERENCE MAX_PERCENT | changed FILE REFERENCE MIN_PERCENT}
 }
 proc read_token {channel} {
     while true {
@@ -69,19 +69,32 @@ proc region {image x y width height wanted minimum {tolerance 0}} {
     puts [format "match=%.3f%% (%d/%d pixels)" $percent $matched $total]
     if {$percent + 1e-9 < $minimum} {exit 1}
 }
-proc differs {image reference maximum} {
+# The percentage of pixels that differ between two images of one size.
+proc difference {image reference} {
     lassign $image width height pixels
     lassign $reference other_width other_height other_pixels
     if {$width != $other_width || $height != $other_height} {fail "image dimensions differ"}
-    if {![string is double -strict $maximum] || $maximum < 0 || $maximum > 100} {fail "MAX_PERCENT must be 0..100"}
     set different 0
     set total [expr {$width * $height}]
     for {set offset 0} {$offset < $total * 3} {incr offset 3} {
         if {[lrange $pixels $offset $offset+2] ne [lrange $other_pixels $offset $offset+2]} {incr different}
     }
-    set percent [expr {100.0 * $different / $total}]
-    puts [format "difference=%.3f%% (%d/%d pixels)" $percent $different $total]
-    if {$percent - 1e-9 > $maximum} {exit 1}
+    puts [format "difference=%.3f%% (%d/%d pixels)" [expr {100.0 * $different / $total}] $different $total]
+    return [expr {100.0 * $different / $total}]
+}
+proc percent_argument {value name} {
+    if {![string is double -strict $value] || $value < 0 || $value > 100} {fail "$name must be 0..100"}
+    return $value
+}
+# Exit 1 unless at most MAXIMUM percent of the pixels differ.
+proc differs {image reference maximum} {
+    set maximum [percent_argument $maximum MAX_PERCENT]
+    if {[difference $image $reference] - 1e-9 > $maximum} {exit 1}
+}
+# Exit 1 unless at least MINIMUM percent of the pixels changed.
+proc changed {image reference minimum} {
+    set minimum [percent_argument $minimum MIN_PERCENT]
+    if {[difference $image $reference] + 1e-9 < $minimum} {exit 1}
 }
 
 if {$argc < 2} usage
@@ -103,6 +116,10 @@ switch -- $command {
     differs {
         if {$argc != 4} usage
         differs [read_ppm [lindex $argv 1]] [read_ppm [lindex $argv 2]] [lindex $argv 3]
+    }
+    changed {
+        if {$argc != 4} usage
+        changed [read_ppm [lindex $argv 1]] [read_ppm [lindex $argv 2]] [lindex $argv 3]
     }
     default usage
 }

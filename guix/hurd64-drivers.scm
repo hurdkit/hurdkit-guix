@@ -1,19 +1,19 @@
-;; guix/hurd64.scm plus the drivers under test (here: 9pfs).
-;;
-;;     make guix-image GUIX_OS=guix/hurd64-drivers.scm
-;;
-;; The drivers are packages in guix/; adding one to the list below puts its
-;; programs into the PATH of every user of the guest.
+;; guix/hurd64.scm with Hurdkit's GNU Mach and the drivers under test: the
+;; guest of make guix-virtio-test, guix-virtio-balloon-test and
+;; guix-virtio-blk-test (scripts/guix_virtio_test.sh). Build it with -L
+;; guix/modules, as scripts/guix_vm.sh does.
+(use-modules (gnu)
+             (gnu system hurd)
+             (hurdkit packages hurd)
+             (hurdkit packages virtio))
 
-(use-modules (gnu))
-
-(define %hurdkit-os
-  (load "hurd64.scm"))
-
-(define %drivers
-  (list (load "9pfs.scm")))
+(define base (load "hurd64.scm"))
 
 (operating-system
-  (inherit %hurdkit-os)
-  (packages (append %drivers
-                    (operating-system-packages %hurdkit-os))))
+  (inherit base)
+  ;; The balloon and block matrices need the shared-interrupt fixes of
+  ;; Hurdkit's GNU Mach.
+  (kernel gnumach-hurdkit)
+  (essential-services (hurd-default-essential-services this-operating-system))
+  (packages (append (list hurdkit-virtio hurd-9pfs hurdkit-guest-compat)
+                    (operating-system-packages base))))

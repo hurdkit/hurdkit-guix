@@ -1,4 +1,5 @@
-;;; Upstream Hurdkit virtio drivers for the Guix Hurd guest.
+;;; Drivers under test in the Guix Hurd guest, and what upstream's Debian
+;;; test harness expects from a guest.
 (define-module (hurdkit packages virtio)
   #:use-module (guix build-system gnu)
   #:use-module (guix build-system trivial)
@@ -9,7 +10,8 @@
   #:use-module (guix utils)
   #:use-module (gnu packages cross-base)
   #:use-module (gnu packages hurd)
-  #:use-module (gnu packages xorg))
+  #:use-module (gnu packages xorg)
+  #:use-module (hurdkit utils))
 
 (define %virtio-commit "ce266bbe3b1a88093f24ca5986c2409414847cc2")
 
@@ -104,4 +106,84 @@ needed to generate and compile the virtio Mach-device server.")
     (description "Build the shared Hurdkit virtio transport, the 9p
 translator, the balloon daemon, the block driver and its Mach-device client
 against the Guix Hurd libraries. MIG generates the block-device server stubs.")
+    (license license:gpl3+)))
+
+;; The 9P2000.L client translator that mounts a virtio-9p share. The
+;; commit is the one toolchain/pins.mk builds.
+(define %9pfs-commit "b5b23deb1df6eb383fd2c0f5271c068861b745a8")
+
+(define-public hurd-9pfs
+  (package
+    (name "hurd-9pfs")
+    (version (git-version "0" "1" %9pfs-commit))
+    (source
+     (origin
+       (method git-fetch)
+       (uri (git-reference
+             (url "https://github.com/bugaevc/9pfs.git")
+             (commit %9pfs-commit)))
+       (file-name (git-file-name "9pfs" version))
+       (sha256
+        (base32 "1wszm163qyzskzpiyhcx2mb2ilpdn2v4f9ays3pfy7qwv2592r1k"))))
+    (build-system gnu-build-system)
+    (arguments
+     (list
+      #:tests? #f
+      #:make-flags
+      #~(list (string-append "CC=" #$(cc-for-target))
+              #$(string-append "MIG=" (or (%current-target-system) "")
+                               (if (%current-target-system) "-mig" "mig"))
+              ;; GNU ld does not resolve 9pfs's references through a
+              ;; dependency of libc ("DSO missing from command line"), so
+              ;; libhurduser and libmachuser are named, as in
+              ;; toolchain/Makefile.
+              "LIBS=shouldbeinlibc ihash ports iohelp fshelp pager hurduser machuser")
+      #:phases
+      #~(modify-phases %standard-phases
+          (delete 'configure)
+          (replace 'install
+            (lambda _
+              (install-file "9pfs" (string-append #$output "/bin")))))))
+    (native-inputs
+     (list (if (%current-target-system)
+               (cross-mig (%current-target-system))
+               mig)))
+    (inputs (list hurd))
+    (supported-systems '("x86_64-gnu" "i586-gnu"))
+    (home-page "https://github.com/bugaevc/9pfs")
+    (synopsis "9P2000.L client translator for the Hurd")
+    (description "9pfs is a Hurd translator that mounts a directory exported
+by a 9P2000.L server, such as QEMU's virtio-9p device.")
+    (license license:gpl3+)))
+
+;; Upstream's virtio harness (scripts/virtio_*_test.py) was written for the
+;; Debian guest: it starts daemons with setsid and ends with poweroff. The
+;; Guix guest has neither command, so the driver-test guest gets these two.
+(define-public hurdkit-guest-compat
+  (package
+    (name "hurdkit-guest-compat")
+    (version "0.1")
+    (source (local-file (hurdkit-file "guix" "compat") "hurdkit-guest-compat"
+                        #:recursive? #t))
+    (build-system gnu-build-system)
+    (arguments
+     (list
+      #:tests? #f
+      #:phases
+      #~(modify-phases %standard-phases
+          (delete 'configure)
+          (replace 'build
+            (lambda _
+              (invoke #$(cc-for-target) "-O2" "-Wall" "-Wextra"
+                      "-o" "setsid" "setsid.c")))
+          (replace 'install
+            (lambda _
+              (let ((bin (string-append #$output "/bin")))
+                (install-file "setsid" bin)
+                (install-file "poweroff" bin)))))))
+    (supported-systems '("x86_64-gnu" "i586-gnu"))
+    (home-page "https://github.com/hurdkit/hurdkit")
+    (synopsis "setsid and poweroff commands for the Guix Hurd test guest")
+    (description "@command{setsid} runs a program in a new session.
+@command{poweroff} shuts the Hurd down with the Shepherd's @command{halt}.")
     (license license:gpl3+)))

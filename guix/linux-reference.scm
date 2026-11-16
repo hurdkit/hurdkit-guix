@@ -40,6 +40,7 @@
 (define %reference-profile
   (mixed-text-file
    "reference-profile"
+   "if [ -f ~/.bashrc ]; then . ~/.bashrc; fi\n"
    "if [ \"$(tty)\" = /dev/tty1 ]; then\n"
    "  exec " (file-append bash "/bin/sh") " " %reference-session "\n"
    "fi\n"))
@@ -71,6 +72,12 @@
          (group "users")
          (supplementary-groups '("wheel" "audio" "video" "input" "seat")))
         %base-user-accounts))
+ ;; The login shell on tty1 starts the niri session.
+ (skeletons
+  (cons (list ".bash_profile" %reference-profile)
+        (filter (lambda (skeleton)
+                  (not (string=? (car skeleton) ".bash_profile")))
+                (default-skeletons))))
  (packages
   (append (list niri foot mesa mesa-utils glmark2 vulkan-tools seatd)
           %base-packages))
@@ -86,9 +93,7 @@
                           (mkdir-p "/run/user/1000")
                           (chown "/run/user/1000"
                                  (passwd:uid user) (passwd:gid user))
-                          (chmod "/run/user/1000" #o700))
-                        (copy-file #$%reference-profile
-                                   "/etc/skel/.bash_profile")))
+                          (chmod "/run/user/1000" #o700))))
     (service agetty-service-type
              (agetty-configuration
               (tty "tty1")

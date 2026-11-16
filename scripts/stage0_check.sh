@@ -76,18 +76,15 @@ for gpu in $STAGE0_GPUS; do
         rm -f "$trace" "$idle_trace" "$benchmark_trace"
         started=0
         if run_logged "$run_dir/start.log" make linux-ref-start \
-            GUIX_GPU="$path" GUIX_DISPLAY=egl-headless GPU="$gpu" \
+            GUIX_GPU="$path" GUIX_DISPLAY=egl-headless GUIX_HOST_GPU="$gpu" \
             GUIX_TRACE='virtio_gpu_cmd_*' GUIX_TRACE_FILE="$trace"; then
             started=1
             linux_started=1
-            if run_logged "$run_dir/trace-idle-disable.log" make linux-ref-qmp QMP_ARGS='trace off virtio_gpu_cmd_*'; then
-                : > "$trace"
-                sleep 10
-                cp "$trace" "$idle_trace"
-                run_logged "$run_dir/trace-idle-enable.log" make linux-ref-qmp QMP_ARGS='trace on virtio_gpu_cmd_*'
-            else
-                record FAIL "$name idle trace control"
-            fi
+            # Ten seconds of the idle desktop: what the trace gains while
+            # nothing changes on the screen.
+            idle_start="$(stat -c %s "$trace" 2>/dev/null || echo 0)"
+            sleep 10
+            tail -c +"$((idle_start + 1))" "$trace" > "$idle_trace" 2>/dev/null || true
             run_logged "$run_dir/session.log" make linux-ref-ssh < scripts/linux-ref-session.sh
             if [[ "$path" == virgl ]] && grep -Eq "GL_RENDERER:.*virgl.*$vendor" "$run_dir/session.log"; then
                 record PASS "$name guest renderer"
@@ -110,11 +107,12 @@ for gpu in $STAGE0_GPUS; do
             else
                 record FAIL "$name compositor screenshot"
             fi
-            if run_logged "$run_dir/input.log" make linux-ref-qmp QMP_ARGS='key super+t'; then
+            if run_logged "$run_dir/input.log" make linux-ref-qmp GUIX_QMP_ARGS='key super+t'; then
                 sleep 3
                 run_logged "$run_dir/screenshot-after.log" make linux-ref-screenshot
                 cp img/guix-linux/screen.ppm "$run_dir/after.ppm"
-                if tclsh scripts/ppm_check.tcl differs "$run_dir/after.ppm" "$run_dir/before.ppm" 99.99 \
+                # The foot window covers part of the screen.
+                if tclsh scripts/ppm_check.tcl changed "$run_dir/after.ppm" "$run_dir/before.ppm" 5 \
                     > "$run_dir/difference.log" &&
                     run_logged "$run_dir/windows.log" make linux-ref-ssh < scripts/linux-ref-windows.sh &&
                     grep -q '"app_id":"foot"' "$run_dir/windows.log"; then
@@ -137,6 +135,7 @@ for gpu in $STAGE0_GPUS; do
             fi
         fi
         if [[ -f "$trace" ]]; then
+            # The whole run: boot, the session checks and glmark2.
             cp "$trace" "$benchmark_trace"
             for sample in "$trace" "$idle_trace" "$benchmark_trace"; do
                 [[ -f "$sample" ]] || continue

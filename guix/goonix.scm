@@ -27,7 +27,7 @@
              (guix utils))
 
 (define %goonix-commit "630ee3040cf582fc5a11afbbaf1702d01e1702cc")
-(define %goonix-url "https://github.com/77787777778777/goonix.git")
+(define %goonix-url "https://github.com/hurdkit/goonix.git")
 
 ;; The same version string as the goonix package of the Nix flake, so that
 ;; `guix --version' prints the same line on the host and in the guest.

@@ -11,7 +11,7 @@ printf 'P6\n# generated fixture\n3 2\n255\n' > "$TEST_DIR/solid.ppm"
 printf '\377\000\000\377\000\000\000\377\000\377\000\000\000\000\377\377\000\000' >> "$TEST_DIR/solid.ppm"
 cp "$TEST_DIR/solid.ppm" "$TEST_DIR/changed.ppm"
 printf '\377\377\377' | dd of="$TEST_DIR/changed.ppm" bs=1 seek=31 conv=notrunc status=none
-echo '1..8'
+echo '1..10'
 failures=0
 number=0
 check() {
@@ -31,6 +31,8 @@ check_fails 'an insufficient colour fraction fails' "${PPM[@]}" region "$TEST_DI
 check 'identical files differ by zero percent' bash -c "tclsh '$REPO_ROOT/scripts/ppm_check.tcl' differs '$TEST_DIR/solid.ppm' '$TEST_DIR/solid.ppm' 0 | grep -Fq '0.000%'"
 check 'a one-pixel difference is measured as 16.67 percent' bash -c "tclsh '$REPO_ROOT/scripts/ppm_check.tcl' differs '$TEST_DIR/solid.ppm' '$TEST_DIR/changed.ppm' 16.67 | grep -Fq '16.667%'"
 check_fails 'a difference just beyond the threshold fails' "${PPM[@]}" differs "$TEST_DIR/solid.ppm" "$TEST_DIR/changed.ppm" 16.66
+check 'a one-pixel change passes a 10 percent minimum' "${PPM[@]}" changed "$TEST_DIR/changed.ppm" "$TEST_DIR/solid.ppm" 10
+check_fails 'an unchanged image fails any minimum' "${PPM[@]}" changed "$TEST_DIR/solid.ppm" "$TEST_DIR/solid.ppm" 0.01
 check_fails 'a truncated image is rejected' bash -c "head -c 30 '$TEST_DIR/solid.ppm' > '$TEST_DIR/truncated.ppm'; tclsh '${PPM[1]}' dimensions '$TEST_DIR/truncated.ppm'"
 check_fails 'an invalid region is rejected' "${PPM[@]}" region "$TEST_DIR/solid.ppm" 0 0 4 2 ff0000 0
 exit "$failures"

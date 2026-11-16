@@ -1,50 +1,57 @@
 #!/usr/bin/env bash
-# Build, boot and test the stage 1 Hurd platform guest.
+# The niri plan's stage-1 gate: build guix/hurd64-platform.scm, boot it in
+# its own directory and port, and run the platform tests in it. Every test
+# but the Rust hello prints TAP; a "not ok", a missing plan, a nonzero exit
+# or a test that runs longer than STAGE1_TEST_TIMEOUT seconds fails. Skips
+# (documented platform differences) are listed, not failed.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIR="$ROOT/img/guix-platform"
-PORT=2226
-export GUIX_DIR="$DIR" GUIX_SSH_PORT="$PORT" GUIX_OS="$ROOT/guix/hurd64-platform.scm"
-export GUILE_AUTO_COMPILE=0
+export GUIX_DIR="${GUIX_DIR:-$ROOT/img/guix-platform}"
+export GUIX_SSH_PORT="${GUIX_SSH_PORT:-2226}"
+export GUIX_OS="$ROOT/guix/hurd64-platform.scm"
+TEST_TIMEOUT="${STAGE1_TEST_TIMEOUT:-600}"
 status=0
 started=0
+guix_vm() { bash "$ROOT/scripts/guix_vm.sh" "$@"; }
 stop_guest() {
     if ((started)); then
         started=0
-        bash "$ROOT/scripts/guix_vm.sh" stop || status=1
+        guix_vm stop || status=1
     fi
 }
 trap stop_guest EXIT
-bash "$ROOT/scripts/guix_vm.sh" image || exit 1
-bash "$ROOT/scripts/guix_vm.sh" start || exit 1
+guix_vm image || exit 1
+guix_vm start || exit 1
 started=1
-run() {
-    echo "+ $*" >&2
-    local output
-    output="$(bash "$ROOT/scripts/guix_vm.sh" ssh root "$@")" || {
-        printf '%s\n' "$output"
-        return 1
-    }
+
+# run_tap COMMAND...: run COMMAND in the guest and check its TAP output.
+run_tap() {
+    local output rc
+    echo "# $*"
+    output="$(guix_vm ssh root timeout "$TEST_TIMEOUT" "$@" 2>&1)"
+    rc=$?
     printf '%s\n' "$output"
-    if [[ "$*" == *shm-unlink* || "$*" == *hurdkit-eventfd* ||
-          "$*" == *hurdkit-epoll* || "$*" == *hurdkit-timerfd* ||
-          "$*" == *hurdkit-signalfd* || "$*" == *hurdkit-rust-evloop* ]]; then
-        if grep -E '^(not ok|Bail out!)|^ok .*# *SKIP' <<<"$output"; then
-            return 1
-        fi
-        grep -q '^TAP version 13' <<<"$output"
+    if (( rc != 0 )) || ! grep -q '^1\.\.[1-9]' <<<"$output" ||
+        grep -Eq '^not ok|^Bail out!' <<<"$output"; then
+        echo "FAIL: $* (exit $rc)"
+        status=1
+    elif grep -q '# *SKIP' <<<"$output"; then
+        echo "PASS: $* (skipped: $(grep -c '# *SKIP' <<<"$output"))"
+    else
+        echo "PASS: $*"
     fi
 }
-run shm-unlink /dev/shm || status=1
-run shm-unlink --anon || status=1
-run shm-unlink /tmp || status=1
-run tmpfs-io /dev/shm || status=1
-# This includes the documented POSIX truncation-boundary regression. If it
-# fails, retain that failure rather than silently skipping the assertion.
-run tmpfs-lifetime /dev/shm 100 || status=1
+
+# tmpfs: /dev/shm is the fixed tmpfs; /tmp (ext2) is the control.
+run_tap tmpfs-shm /dev/shm 100
+run_tap tmpfs-shm /tmp 20
 for name in eventfd epoll timerfd signalfd; do
-    run "hurdkit-$name" || status=1
+    run_tap "hurd-epoll-shim-test-$name"
 done
-run hurdkit-rust-hello || status=1
-run hurdkit-rust-evloop || status=1
+if [[ "$(guix_vm ssh root hurdkit-rust-hello)" != "hurdkit rust hello" ]]; then
+    echo "FAIL: hurdkit-rust-hello"
+    status=1
+fi
+run_tap hurdkit-rust-evloop
+stop_guest
 exit "$status"

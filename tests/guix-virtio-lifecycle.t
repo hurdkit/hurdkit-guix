@@ -1,146 +1,121 @@
 #!/usr/bin/env bash
-# TAP regression test for the Guix virtio wrapper's shutdown and cleanup.
-# No real QEMU, Guix image, guest, or host files are used.
+# TAP: scripts/guix_virtio_test.sh with fake guix, QEMU, guix_vm.sh and
+# matrices. No image is built and no guest is booted.
 set -uo pipefail
-
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEST_DIR"' EXIT
 export TEST_DIR
-mkdir -p "$TEST_DIR/scripts" "$TEST_DIR/share" "$TEST_DIR/store/bin" \
-    "$TEST_DIR/img/guix"
-touch "$TEST_DIR/img/guix/hurd64.base.qcow2" "$TEST_DIR/key"
-printf '#!/usr/bin/env bash\n' > "$TEST_DIR/store/bin/virtio-9p"
-printf '#!/usr/bin/env bash\n' > "$TEST_DIR/store/bin/9pfs"
-chmod +x "$TEST_DIR/store/bin/"*
-cp "$REPO_ROOT/scripts/guix_virtio_test.sh" "$TEST_DIR/scripts/"
 
+mkdir -p "$TEST_DIR/scripts" "$TEST_DIR/bin" "$TEST_DIR/store/virtio/bin" \
+    "$TEST_DIR/store/9pfs/bin"
+cp "$REPO_ROOT/scripts/guix_virtio_test.sh" "$TEST_DIR/scripts/"
+# guix_vm.sh: log the call; "stop" fails when FAKE_STOP_FAILS=1, "status"
+# when FAKE_NO_GUEST=1.
 cat > "$TEST_DIR/scripts/guix_vm.sh" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "$TEST_ROOT/guest-commands"
+printf '%s\n' "$*" >> "$TEST_DIR/calls"
 case "$1" in
-    start) exit 0 ;;
-    stop)
-        echo 'guix_vm: the guest did not shut down within 60 s' >&2
-        exit 1
-        ;;
+    stop) [[ "${FAKE_STOP_FAILS:-0}" != 1 ]] ;;
+    status) [[ "${FAKE_NO_GUEST:-0}" != 1 ]] ;;
     *) exit 0 ;;
 esac
 SH
-cat > "$TEST_DIR/matrix" <<'SH'
+# The matrices: record their environment; fail when FAKE_MATRIX_FAILS=1.
+for matrix in virtio_test.py virtio_balloon_test.py virtio_blk_test.py; do
+    cat > "$TEST_DIR/scripts/$matrix" <<'PY'
+import os, sys
+with open(os.path.join(os.environ["TEST_DIR"], "matrix"), "a") as log:
+    log.write(" ".join([os.path.basename(sys.argv[0])] + sys.argv[1:]) + "\n")
+    for name in ("VIRTIO_9P_BIN", "P9FS_BIN", "VIRTIO_BALLOON_BIN",
+                 "VIRTIO_BLK_BIN", "VBLK_CLIENT_BIN", "SSH_PORT", "QEMU_LOG",
+                 "SHARE", "TEST_DISK", "REUSE"):
+        log.write("%s=%s\n" % (name, os.environ.get(name, "")))
+sys.exit(1 if os.environ.get("FAKE_MATRIX_FAILS") == "1" else 0)
+PY
+done
+cat > "$TEST_DIR/bin/guix" <<'SH'
 #!/usr/bin/env bash
-printf '24/24 assertions passed\n'
+printf '%s\n' "$*" >> "$TEST_DIR/guix-calls"
+printf '%s\n' "$TEST_DIR/store/virtio" "$TEST_DIR/store/9pfs"
 SH
-chmod +x "$TEST_DIR/scripts/guix_vm.sh" "$TEST_DIR/matrix"
-printf '#!/usr/bin/env bash\n[[ "${1:-}" == --version ]] && { echo "guix (GNU Guix) 1.5.0-goonix.test"; exit 0; }\nexit 99\n' > "$TEST_DIR/guix"
-chmod +x "$TEST_DIR/guix"
+cat > "$TEST_DIR/bin/qemu-system-x86_64" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' v9fs_walk v9fs_read virtio_balloon_set_config virtio_blk_req_complete
+SH
+chmod +x "$TEST_DIR/bin/"*
 
-set +e
-TEST_ROOT="$TEST_DIR" GUIX="$TEST_DIR/guix" GUIX_DIR="$TEST_DIR/guix-dir" SHARE="$TEST_DIR/share" \
-    SSH_KEY="$TEST_DIR/key" VIRTIO_STORE="$TEST_DIR/store" \
-    P9FS_STORE="$TEST_DIR/store" \
-    bash -c 'python3() { "$TEST_ROOT/matrix" "$@"; }; export -f python3; source "$1/scripts/guix_virtio_test.sh"' \
-    _ "$TEST_DIR" > "$TEST_DIR/output" 2>&1
-rc=$?
-set -e
-trap - EXIT
+# run DEVICE [VAR=VALUE...]: a fresh run; its exit status is in $rc.
+run() {
+    local device="$1"; shift
+    rm -rf "$TEST_DIR/guest" "$TEST_DIR/calls" "$TEST_DIR/matrix" \
+        "$TEST_DIR/guix-calls"
+    mkdir -p "$TEST_DIR/guest"
+    env PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guest" \
+        XDG_RUNTIME_DIR="$TEST_DIR" "$@" \
+        bash "$TEST_DIR/scripts/guix_virtio_test.sh" "$device" \
+        > "$TEST_DIR/output" 2>&1
+    rc=$?
+}
 
-echo '1..8'
+echo '1..15'
 failures=0
-if (( rc != 0 )); then
-    echo 'ok 1 - a forced shutdown fails even after a passing matrix'
-else
-    echo 'not ok 1 - forced shutdown returned success'
-    failures=1
-fi
-if grep -q 'matrix passed, but shutdown failed' "$TEST_DIR/output"; then
-    echo 'ok 2 - matrix and lifecycle failure are distinguished'
-else
-    echo 'not ok 2 - shutdown failure is not reported'
-    sed 's/^/# /' "$TEST_DIR/output"
-    failures=1
-fi
-if [[ -d "$TEST_DIR/guix-dir" ]] && ! grep -q 'left running for diagnosis' "$TEST_DIR/output"; then
-    echo 'ok 3 - stopped diagnostic state is retained without a live-guest claim'
-else
-    echo 'not ok 3 - cleanup loses logs or falsely claims the guest is running'
-    failures=1
-fi
-if grep -q '^start -- ' "$TEST_DIR/guest-commands"; then
-    echo 'ok 4 - virtio options are forwarded through the start entry point'
-else
-    echo 'not ok 4 - virtio start options were lost'
-    failures=1
-fi
-if [[ -L "$TEST_DIR/guix-dir/hurd64.base.qcow2" ]] &&
-   [[ "$(readlink "$TEST_DIR/guix-dir/hurd64.base.qcow2")" == "$TEST_DIR/img/guix/hurd64.base.qcow2" ]]; then
-    echo 'ok 5 - the default diagnostic base is linked before boot'
-else
-    echo 'not ok 5 - the diagnostic base was not selected explicitly'
-    failures=1
-fi
-rm -rf "$TEST_DIR"
-# A relative base override must not become a link relative to GUIX_DIR.
-BASE_DIR="$(mktemp -d)"
-trap 'rm -rf "$BASE_DIR"' EXIT
-printf '#!/usr/bin/env bash\n[[ "${1:-}" == --version ]] && { echo "guix (GNU Guix) 1.5.0-goonix.test"; exit 0; }\nexit 99\n' > "$BASE_DIR/guix"
-chmod +x "$BASE_DIR/guix"
-touch "$BASE_DIR/hurd64.base.qcow2" "$BASE_DIR/key"
-set +e
-(cd "$BASE_DIR" && TEST_ROOT="$BASE_DIR" GUIX="$BASE_DIR/guix" \
-    GUIX_DIR="$BASE_DIR/guest" GUIX_BASE_IMG=hurd64.base.qcow2 \
-    SHARE="$BASE_DIR/share" SSH_KEY="$BASE_DIR/key" \
-    bash "$REPO_ROOT/scripts/guix_virtio_test.sh" > "$BASE_DIR/output" 2>&1)
-base_rc=$?
-set -e
-if [[ "$(readlink "$BASE_DIR/guest/hurd64.base.qcow2")" == "$BASE_DIR/hurd64.base.qcow2" ]]; then
-    echo 'ok 6 - relative base overrides are normalized before linking'
-else
-    echo 'not ok 6 - relative base overrides are normalized before linking'
-    sed 's/^/# /' "$BASE_DIR/output"
-    failures=1
-fi
-rm -rf "$BASE_DIR"
+number=0
+check() {
+    local description="$1"; shift
+    number=$((number + 1))
+    if "$@"; then
+        echo "ok $number - $description"
+    else
+        echo "not ok $number - $description"
+        sed 's/^/# /' "$TEST_DIR/output" 2>/dev/null
+        failures=$((failures + 1))
+    fi
+}
+called() { grep -q -- "$1" "$TEST_DIR/calls" 2>/dev/null; }
+matrix_has() { grep -qx -- "$1" "$TEST_DIR/matrix" 2>/dev/null; }
 
-# A Guix other than goonix builds drivers against libraries the guest does
-# not have: refuse it before anything is created or booted.
-OTHER_DIR="$(mktemp -d)"
-trap 'rm -rf "$OTHER_DIR"' EXIT
-printf '#!/usr/bin/env bash\necho "guix (GNU Guix) 1.5.0"\n' > "$OTHER_DIR/guix"
-chmod +x "$OTHER_DIR/guix"
-touch "$OTHER_DIR/hurd64.base.qcow2" "$OTHER_DIR/key"
-set +e
-GUIX="$OTHER_DIR/guix" GUIX_DIR="$OTHER_DIR/guest" \
-    GUIX_BASE_IMG="$OTHER_DIR/hurd64.base.qcow2" SSH_KEY="$OTHER_DIR/key" \
-    bash "$REPO_ROOT/scripts/guix_virtio_test.sh" > "$OTHER_DIR/output" 2>&1
-other_rc=$?
-set -e
-if (( other_rc != 0 )) && grep -q 'is not goonix' "$OTHER_DIR/output" &&
-   [[ ! -e "$OTHER_DIR/guest" ]]; then
-    echo 'ok 7 - a Guix other than goonix is refused'
-else
-    echo 'not ok 7 - a Guix other than goonix was used'
-    sed 's/^/# /' "$OTHER_DIR/output"
-    failures=1
-fi
+run bogus
+check 'an unknown device is refused' test "$rc" = 2
 
-# REUSE=1 is what a failed run tells the operator to do next: it must accept
-# the directory and guest that run left behind instead of refusing them.
-mkdir -p "$OTHER_DIR/guest"
-printf '#!/usr/bin/env bash\n[[ "${1:-}" == --version ]] && echo "guix (GNU Guix) 1.5.0-goonix.test"\nexit 0\n' > "$OTHER_DIR/guix"
-set +e
-GUIX="$OTHER_DIR/guix" GUIX_DIR="$OTHER_DIR/guest" REUSE=1 \
-    GUIX_BASE_IMG="$OTHER_DIR/hurd64.base.qcow2" SSH_KEY="$OTHER_DIR/key" \
-    VIRTIO_STORE="$OTHER_DIR/none" P9FS_STORE="$OTHER_DIR/none" \
-    bash "$REPO_ROOT/scripts/guix_virtio_test.sh" > "$OTHER_DIR/output" 2>&1
-set -e
-if ! grep -q 'already exists' "$OTHER_DIR/output" &&
-   grep -q 'driver binaries are missing' "$OTHER_DIR/output"; then
-    echo 'ok 8 - REUSE=1 accepts the directory of a failed run'
-else
-    echo 'not ok 8 - REUSE=1 refused the directory of a failed run'
-    sed 's/^/# /' "$OTHER_DIR/output"
-    failures=1
-fi
-rm -rf "$OTHER_DIR"
+run 9p
+check 'a passing 9p run succeeds' test "$rc" = 0
+check 'it builds the image, boots and stops the guest' \
+    bash -c 'grep -qx image "$1" && grep -q "^start -- " "$1" && grep -qx stop "$1"' _ "$TEST_DIR/calls"
+check 'the guest gets the 9p device and its trace events' \
+    bash -c 'grep "^start -- " "$1" | grep -q -- "-trace enable=v9fs_walk .*-D .*virtio-9p-pci,fsdev=virtfs0"' _ "$TEST_DIR/calls"
+check 'the matrix gets the Guix-built driver binaries' \
+    bash -c 'grep -qx "VIRTIO_9P_BIN=$1/store/virtio/bin/virtio-9p" "$1/matrix" && grep -qx "P9FS_BIN=$1/store/9pfs/bin/9pfs" "$1/matrix"' _ "$TEST_DIR"
+
+check 'the 9p share is seeded with the file the matrix reads' \
+    bash -c '[[ "$(cat "$1/guest/share/host-seed.txt")" == "from host" ]]' _ "$TEST_DIR"
+
+run 9p FAKE_MATRIX_FAILS=1
+check 'a failed matrix fails the run' test "$rc" = 1
+check 'a failed matrix leaves the guest running' bash -c '! grep -qx stop "$1"' _ "$TEST_DIR/calls"
+
+run 9p FAKE_STOP_FAILS=1
+check 'an unclean shutdown after a passing matrix fails the run' \
+    bash -c '[[ "$1" == 1 ]] && grep -q "did not shut down cleanly" "$2"' _ "$rc" "$TEST_DIR/output"
+
+run 9p REUSE=1
+check 'REUSE=1 runs the matrix on the running guest' \
+    bash -c '[[ "$1" == 0 ]] && grep -qx status "$2" && ! grep -q "^start\|^image\|^stop" "$2" && grep -qx REUSE=1 "$3"' _ "$rc" "$TEST_DIR/calls" "$TEST_DIR/matrix"
+
+run 9p REUSE=1 FAKE_NO_GUEST=1
+check 'REUSE=1 without a running guest fails before the matrix' \
+    bash -c '[[ "$1" == 1 && ! -e "$2" ]]' _ "$rc" "$TEST_DIR/matrix"
+
+run 9p VIRTIO_SRC=/src/virtio
+check 'VIRTIO_SRC builds the drivers from that checkout' \
+    grep -q -- '--with-source=hurdkit-virtio=/src/virtio' "$TEST_DIR/guix-calls"
+
+run balloon
+check 'balloon finds the QEMU monitor next to its log' \
+    test "$(readlink "$TEST_DIR/guest/virtio-balloon-test-monitor.sock")" = "$TEST_DIR/hurdkit-guix-2231.monitor"
+
+run blk
+check 'blk seeds a test disk and attaches it' \
+    bash -c 'grep -qx "virtio_blk_test.py seed $1/guest/test-disk.img 64" "$1/matrix" && grep "^start -- " "$1/calls" | grep -q "file=$1/guest/test-disk.img.*virtio-blk-pci"' _ "$TEST_DIR"
+check 'blk runs its matrix with the client binary' \
+    matrix_has "VBLK_CLIENT_BIN=$TEST_DIR/store/virtio/bin/vblk-client"
 exit "$failures"

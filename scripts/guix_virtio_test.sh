@@ -1,174 +1,156 @@
 #!/usr/bin/env bash
-# Run the upstream virtio-9p matrix in the Guix Hurd guest.
+# Run upstream's virtio driver matrices in the Guix GNU/Hurd guest.
 #
-# scripts/virtio_test.py owns the actual assertions. This wrapper supplies
-# Guix's SSH port, halt semantics, and separately built driver binaries. It
-# deliberately does not reuse the Debian image or install Debian packages.
+# Usage: guix_virtio_test.sh 9p|balloon|blk
 #
-# Build the inputs first:
-#   guix build --target=x86_64-pc-gnu -f guix/virtio-9p.scm
-#   guix build --target=x86_64-pc-gnu -f guix/9pfs.scm
+# The assertions are upstream's scripts/virtio_test.py,
+# virtio_balloon_test.py and virtio_blk_test.py, unchanged. This wrapper
+# does for the Guix guest what scripts/virtio_*_test.sh do for the Debian
+# one: it boots guix/hurd64-drivers.scm with the device and its QEMU trace
+# events, builds the driver binaries, and hands both to the matrix.
 #
-# The guest runs from a disposable overlay. On failure it is left running,
-# with its serial log and QEMU monitor available for inspection.
+# Environment:
+#   REUSE=1        run the matrix against the guest that a failed run left
+#                  running, instead of booting a new one
+#   MODE           matrix mode (default main)
+#   GDB=1          ask the matrix for stack traces on failure (needs gdb in
+#                  the guest, which the Guix guest does not have)
+#   VIRTIO_SRC     build the drivers from this checkout of hurdkit/virtio,
+#                  not from the commit (hurdkit packages virtio) pins
+#   GUIX_DIR       image and run directory (default img/guix-drivers)
+#   GUIX_SSH_PORT  forwarded SSH port (default 2231)
+#
+# A failed matrix leaves the guest running for inspection, as upstream's
+# scripts do. After a passing matrix the guest must have shut down cleanly.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-export GUIX_DIR="${GUIX_DIR:-$REPO_ROOT/img/guix/virtio-test}"
-GUIX_BASE_IMG="${GUIX_BASE_IMG:-$REPO_ROOT/img/guix/hurd64.base.qcow2}"
-export GUIX_SSH_PORT="${GUIX_SSH_PORT:-2231}"
-export GUIX_BOOT_ATTEMPTS="${GUIX_BOOT_ATTEMPTS:-2}"
-export GUIX_BOOT_TIMEOUT="${GUIX_BOOT_TIMEOUT:-180}"
-export SSH_HOST="${SSH_HOST:-127.0.0.1}"
-export SSH_PORT="$GUIX_SSH_PORT"
-export SSH_KEY="${SSH_KEY:-${SSH_KEY_DIR:-$REPO_ROOT/img/keys}/root_ed25519}"
-export SHARE="${SHARE:-$GUIX_DIR/share}"
-export MOUNT_TAG="${MOUNT_TAG:-hostshare}"
-export QEMU_LOG="$GUIX_DIR/serial.log"
-export GDB="${GDB:-0}"
-export VIRTIO_ADDR="${VIRTIO_ADDR-0x5}"
-export VIRTIO_GDB_COMMAND="${VIRTIO_GDB_COMMAND:-gdb}"
-export VIRTIO_HALT_COMMAND="${VIRTIO_HALT_COMMAND:-halt}"
-export VIRTIO_POWEROFF_TIMEOUT="${VIRTIO_POWEROFF_TIMEOUT:-60}"
+device="${1:-}"
+case "$device" in
+    9p)
+        matrix=virtio_test.py
+        trace_prefix=v9fs_
+        ;;
+    balloon)
+        matrix=virtio_balloon_test.py
+        trace_prefix=virtio_balloon_
+        ;;
+    blk)
+        matrix=virtio_blk_test.py
+        trace_prefix=virtio_blk_
+        ;;
+    *)
+        echo "usage: guix_virtio_test.sh 9p|balloon|blk" >&2
+        exit 2
+        ;;
+esac
+
 GUIX="${GUIX:-guix}"
-MODE="${MODE:-main}"
-VIRTIO_STORE="${VIRTIO_STORE:-}"
-P9FS_STORE="${P9FS_STORE:-}"
-MONITOR_SOCKET="${XDG_RUNTIME_DIR:-/tmp}/hurdkit-guix-${GUIX_SSH_PORT}.monitor"
-FAILED=0
-GUEST_STARTED=0
-SUCCESS=0
-
-need_guest() {
-    GUIX_DIR="$GUIX_DIR" GUIX_SSH_PORT="$GUIX_SSH_PORT" \
-        SSH_KEY_DIR="$(dirname "$SSH_KEY")" GUIX="$GUIX" \
-        bash "$SCRIPT_DIR/guix_vm.sh" "$@"
-}
-
-guest_start() {
-    if (( $# )); then
-        # Positional parameters preserve each QEMU option across the script
-        # boundary. Unlike Bash arrays, they need no environment trick.
-        need_guest start -- "$@"
-    else
-        need_guest start
-    fi
-}
-
+QEMU_SYSTEM="${QEMU_SYSTEM:-qemu-system-x86_64}"
 REUSE="${REUSE:-0}"
+MODE="${MODE:-main}"
+export GUIX_DIR="${GUIX_DIR:-$REPO_ROOT/img/guix-drivers}"
+export GUIX_SSH_PORT="${GUIX_SSH_PORT:-2231}"
+export GUIX_OS="$REPO_ROOT/guix/hurd64-drivers.scm"
+export GUIX_MEMORY="${GUIX_MEMORY:-2048}"
+export SSH_KEY_DIR="${SSH_KEY_DIR:-$REPO_ROOT/img/keys}"
+export SSH_HOST="${SSH_HOST:-127.0.0.1}"
+# What the matrices read (see the docstrings of scripts/virtio_*_test.py).
+export SSH_PORT="$GUIX_SSH_PORT" SSH_KEY="$SSH_KEY_DIR/root_ed25519"
+export QEMU_LOG="$GUIX_DIR/$device.trace"
+export REUSE GDB="${GDB:-0}" RAM_MB="$GUIX_MEMORY"
+
+guix_vm() {
+    GUIX="$GUIX" QEMU_SYSTEM="$QEMU_SYSTEM" bash "$SCRIPT_DIR/guix_vm.sh" "$@"
+}
+
 if [[ "$REUSE" == 1 ]]; then
-    # A failed run leaves its directory and guest for exactly this rerun.
-    [[ -d "$GUIX_DIR" ]] || {
-        echo "guix-virtio-test: REUSE=1 but $GUIX_DIR does not exist; run once without REUSE" >&2
+    guix_vm status >/dev/null || {
+        echo "guix-virtio-test: REUSE=1, but no guest answers on port $GUIX_SSH_PORT" >&2
         exit 1
     }
-elif [[ -e "$GUIX_DIR" ]]; then
-    echo "guix-virtio-test: $GUIX_DIR already exists; stop its guest and remove it, or rerun with REUSE=1" >&2
-    exit 1
-fi
-version="$("$GUIX" --version 2>/dev/null | head -n 1)"
-[[ "${GUIX_ANY_VERSION:-0}" == 1 || "$version" == *goonix* ]] || {
-    # Driver packages built by another Guix link against libraries that
-    # the guest does not have.
-    echo "guix-virtio-test: $GUIX is not goonix ($version); run inside nix develop ./nix#guix" >&2
-    exit 1
-}
-[[ -f "$GUIX_BASE_IMG" ]] || {
-    echo "guix-virtio-test: missing base image $GUIX_BASE_IMG (build it with make guix-image)" >&2
-    exit 1
-}
-[[ -f "$SSH_KEY" ]] || {
-    echo "guix-virtio-test: missing root key $SSH_KEY" >&2
-    exit 1
-}
-GUIX_BASE_IMG="$(readlink -f "$GUIX_BASE_IMG")"
-refresh_serial_log() {
-    local latest
-    latest="$(find "$GUIX_DIR" -maxdepth 1 -type f -name 'serial-[0-9]*.log' \
-        -printf '%f\n' | sort -V | tail -n 1)"
-    if [[ -n "$latest" ]]; then
-        QEMU_LOG="$GUIX_DIR/$latest"
-        export QEMU_LOG
-    fi
-}
-
-cleanup() {
-    if (( ! SUCCESS )); then
-        FAILED=1
-        if (( GUEST_STARTED )); then
-            cat >&2 <<EOF
-guix-virtio-test: FAILED; guest left running for diagnosis.
-  serial: $QEMU_LOG
-  monitor: $MONITOR_SOCKET
-  SSH: ssh -i $SSH_KEY -p $GUIX_SSH_PORT root@$SSH_HOST
-  rerun the matrix on it: GUIX_DIR="$GUIX_DIR" GUIX_SSH_PORT="$GUIX_SSH_PORT" MODE=$MODE REUSE=1 bash $0
-  stop only after diagnosis: GUIX_DIR="$GUIX_DIR" GUIX_SSH_PORT="$GUIX_SSH_PORT" bash "$SCRIPT_DIR/guix_vm.sh" stop
-EOF
-        else
-            echo "guix-virtio-test: FAILED; guest stopped; logs retained in $GUIX_DIR" >&2
-        fi
-        exit 1
-    fi
-    need_guest stop >/dev/null 2>&1 || true
-    # Only the synthetic diagnostic directory is removed. The base symlink's
-    # target and the store-built 9pfs package are not touched.
-    rm -rf "$GUIX_DIR"
-}
-trap cleanup EXIT
-
-mkdir -p "$GUIX_DIR/tmp" "$SHARE"
-# This is a diagnostic image only; it never replaces img/guix/hurd64.base.qcow2.
-# A reused directory keeps the link of the run that booted its guest.
-[[ -L "$GUIX_DIR/hurd64.base.qcow2" ]] || ln -s "$GUIX_BASE_IMG" "$GUIX_DIR/hurd64.base.qcow2"
-if [[ -z "$P9FS_STORE" ]]; then
-    P9FS_STORE="$($GUIX build --load-path="$REPO_ROOT/guix/modules" --target=x86_64-pc-gnu -f "$REPO_ROOT/guix/9pfs.scm")"
-fi
-if [[ -z "$VIRTIO_STORE" ]]; then
-    VIRTIO_STORE="$($GUIX build --load-path="$REPO_ROOT/guix/modules" --target=x86_64-pc-gnu -f "$REPO_ROOT/guix/virtio-9p.scm")"
-fi
-export P9FS_BIN="$P9FS_STORE/bin/9pfs"
-export VIRTIO_9P_BIN="$VIRTIO_STORE/bin/virtio-9p"
-[[ -x "$P9FS_BIN" && -x "$VIRTIO_9P_BIN" ]] || {
-    echo "guix-virtio-test: Guix-built driver binaries are missing" >&2
-    exit 1
-}
-printf 'from host\n' > "$SHARE/host-seed.txt"
-
-if [[ "$REUSE" == 1 ]]; then
-    need_guest status
-    GUEST_STARTED=1
 else
-    # Keep the virtio device optional. Ordinary guix-start never gets it.
-    # The upstream Debian default uses a separate IRQ on i440fx. Verify the
-    # q35 topology before treating that same address as an IRQ control here.
-    guest_start \
-        -fsdev "local,id=virtfs0,path=$SHARE,security_model=none" \
-        -device "virtio-9p-pci,fsdev=virtfs0,mount_tag=$MOUNT_TAG,disable-legacy=off${VIRTIO_ADDR:+,addr=$VIRTIO_ADDR}"
-    GUEST_STARTED=1
+    guix_vm image
 fi
-refresh_serial_log
 
-# The upstream harness remains authoritative for all mount and I/O checks.
-if ! python3 "$SCRIPT_DIR/virtio_test.py" "$MODE"; then
-    FAILED=1
+# The binaries the matrix copies into the guest. They link against the
+# guest's own libraries, since the same goonix builds both.
+build=("$GUIX" build --load-path="$REPO_ROOT/guix/modules" --target=x86_64-pc-gnu)
+[[ -z "${VIRTIO_SRC:-}" ]] || build+=(--with-source="hurdkit-virtio=$VIRTIO_SRC")
+mapfile -t stores < <("${build[@]}" hurdkit-virtio hurd-9pfs)
+(( ${#stores[@]} == 2 )) || {
+    echo "guix-virtio-test: building the drivers failed" >&2
+    exit 1
+}
+virtio="${stores[0]}"
+export VIRTIO_9P_BIN="$virtio/bin/virtio-9p"
+export VIRTIO_BALLOON_BIN="$virtio/bin/virtio-balloon"
+export VIRTIO_BLK_BIN="$virtio/bin/virtio-blk"
+export VBLK_CLIENT_BIN="$virtio/bin/vblk-client"
+export P9FS_BIN="${stores[1]}/bin/9pfs"
+
+device_args=()
+case "$device" in
+    9p)
+        export SHARE="$GUIX_DIR/share" MOUNT_TAG="${MOUNT_TAG:-hostshare}"
+        mkdir -p "$SHARE"
+        # The matrix reads this file in the guest (as scripts/virtio_test.sh
+        # seeds it for the Debian guest).
+        printf 'from host\n' > "$SHARE/host-seed.txt"
+        device_args=(-fsdev "local,id=virtfs0,path=$SHARE,security_model=none"
+                     -device "virtio-9p-pci,fsdev=virtfs0,mount_tag=$MOUNT_TAG,disable-legacy=off,addr=0x5")
+        ;;
+    balloon)
+        # The matrix finds the QEMU monitor next to its log.
+        ln -sfn "${XDG_RUNTIME_DIR:-/tmp}/hurdkit-guix-$GUIX_SSH_PORT.monitor" \
+            "$GUIX_DIR/virtio-balloon-test-monitor.sock"
+        device_args=(-device "virtio-balloon-pci,disable-legacy=off,addr=0x5")
+        ;;
+    blk)
+        export TEST_DISK="$GUIX_DIR/test-disk.img" DISK_MB="${DISK_MB:-64}"
+        if [[ "$REUSE" != 1 || ! -f "$TEST_DISK" ]]; then
+            python3 "$SCRIPT_DIR/virtio_blk_test.py" seed "$TEST_DISK" "$DISK_MB"
+        fi
+        device_args=(-drive "if=none,id=vd0,file=$TEST_DISK,format=raw,cache=writeback"
+                     -device "virtio-blk-pci,drive=vd0,disable-legacy=off,addr=0x5")
+        ;;
+esac
+
+if [[ "$REUSE" != 1 ]]; then
+    # Each event is enabled by name: QEMU accepts a pattern here but then
+    # writes nothing to the -D log.
+    trace_args=()
+    while IFS= read -r event; do
+        trace_args+=(-trace "enable=$event")
+    done < <("$QEMU_SYSTEM" -trace help | grep "^$trace_prefix")
+    (( ${#trace_args[@]} > 0 )) || {
+        echo "guix-virtio-test: QEMU has no $trace_prefix trace events" >&2
+        exit 1
+    }
+    rm -f "$QEMU_LOG"
+    guix_vm start -- "${trace_args[@]}" -D "$QEMU_LOG" "${device_args[@]}"
+fi
+
+if ! python3 "$SCRIPT_DIR/$matrix" "$MODE"; then
+    cat >&2 <<EOF
+guix-virtio-test: $device matrix FAILED; the guest is left running.
+  QEMU trace: $QEMU_LOG
+  serial log: $(cat "$GUIX_DIR/.serial-current" 2>/dev/null)
+  SSH:        make guix-ssh GUIX_SSH_PORT=$GUIX_SSH_PORT (or ssh -i $SSH_KEY -p $GUIX_SSH_PORT root@$SSH_HOST)
+  rerun:      REUSE=1 GUIX_DIR=$GUIX_DIR GUIX_SSH_PORT=$GUIX_SSH_PORT bash $0 $device
+  stop:       GUIX_DIR=$GUIX_DIR GUIX_SSH_PORT=$GUIX_SSH_PORT bash $SCRIPT_DIR/guix_vm.sh stop
+EOF
     exit 1
 fi
-if [[ "$MODE" == main ]]; then
-    # Guix's halt stops Mach and leaves QEMU running. The wrapper's stop
-    # waits for the serial completion marker before removing the overlay.
-    # A forced stop is a failed lifecycle gate even if the matrix passed.
-    set +e
-    need_guest stop
-    stop_rc=$?
-    refresh_serial_log
-    set -e
-    GUEST_STARTED=0
-    (( stop_rc == 0 )) || {
-        echo "guix-virtio-test: matrix passed, but shutdown failed; see $QEMU_LOG" >&2
-        exit "$stop_rc"
+
+# A REUSE run leaves the guest running, as upstream's does. Otherwise the
+# matrix ended with poweroff; stop confirms that the Hurd shut down cleanly
+# (an unclean shutdown fails the run even though the matrix passed).
+if [[ "$REUSE" != 1 ]]; then
+    guix_vm stop || {
+        echo "guix-virtio-test: the $device matrix passed, but the guest did not shut down cleanly" >&2
+        exit 1
     }
 fi
-
-SUCCESS=1
-echo "guix-virtio-test: matrix and shutdown completed; no-device lifecycle control remains a separate boot."
+echo "guix-virtio-test: $device matrix passed"

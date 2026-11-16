@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: 7778777 <7778777@7778777.online>
+Date: Mon, 16 Nov 2026 17:16:28 +0100
+Subject: [PATCH] tmpfs: keep mappings of an unlinked file working after its
+ last close
+
+Shared memory is commonly created, unlinked and mapped, and its file
+descriptor closed: shm_open and shm_unlink, SHM_ANON, or Wayland clients'
+buffers.  On tmpfs every later access to such a mapping faults.
+
+When the last reference to an unlinked node goes away, diskfs_drop_node
+truncates it to zero, and diskfs_truncate shrinks the default pager's
+memory object to zero with it.  The mappings still reference that object,
+and every page now lies beyond its end.
+
+Leave the memory object's size alone in that case: diskfs_drop_node is
+the only caller that truncates a node whose cache_id is already zero.  The
+node's storage is still released, and the kernel frees the memory object
+with its last mapping.
+---
+ tmpfs/node.c | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/tmpfs/node.c b/tmpfs/node.c
+index ff6c28eb..b0ddbf74 100644
+--- a/tmpfs/node.c
++++ b/tmpfs/node.c
+@@ -74,8 +74,8 @@ diskfs_free_node (struct node *np, mode_t mode)
+     {
+     case DT_REG:
+       if (np->dn->u.reg.memobj != MACH_PORT_NULL) {
+-      /* XXX GNU Mach will terminate the object, and thus existing mappings
+-       * will get SIGBUS.  */
++	/* Mappings of the file keep the memory object alive (see
++	   diskfs_truncate); only tmpfs's own references go here.  */
+ 	vm_deallocate (mach_task_self (), np->dn->u.reg.memref, 4096);
+ 	mach_port_deallocate (mach_task_self (), np->dn->u.reg.memobj);
+       }	
+@@ -457,7 +457,14 @@ diskfs_truncate (struct node *np, off_t size)
+   off_t set_size = size;
+   size = round_page (size);
+ 
+-  if (np->dn->u.reg.memobj != MACH_PORT_NULL)
++  /* diskfs_drop_node truncates an unlinked file to zero once its last
++     reference is gone (diskfs_try_dropping_softrefs has cleared cache_id
++     by then).  The file may still be mapped, as shared memory usually is
++     after shm_unlink or unlink and close: do not shrink the memory object
++     then, or those mappings fault.  The kernel releases the object with
++     its last mapping.  */
++  if (np->dn->u.reg.memobj != MACH_PORT_NULL
++      && !(size == 0 && np->cache_id == 0))
+     {
+       error_t err = default_pager_object_set_size (np->dn->u.reg.memobj, set_size);
+       if (err == MIG_BAD_ID)
+-- 
+2.56.0
+

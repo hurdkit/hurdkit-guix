@@ -72,12 +72,6 @@ LOCK_FILE="$GUIX_DIR/.build.lock"
 ROOT_PARTITION="${GUIX_ROOT_PARTITION:-1}"
 GUEST_SSH_PORT="${GUIX_GUEST_SSH_PORT:-2222}"
 GUIX_GUEST_KIND="${GUIX_GUEST_KIND:-hurd}"
-# The virtio matrices share their assertions with the Debian guest. Guix
-# owns the actual lifecycle here: halt reaches Mach but does not stop QEMU.
-export VIRTIO_HALT_COMMAND="${VIRTIO_HALT_COMMAND:-halt}"
-export VIRTIO_NO_POWEROFF=1
-export VIRTIO_NO_SETSID=1
-export VIRTIO_MONITOR_SOCKET="$MONITOR_SOCKET"
 
 die() {
     echo "guix_vm: $*" >&2
@@ -202,10 +196,30 @@ new_overlay() {
     "$QEMU_IMG" create -q -f qcow2 -b "$(readlink -f "$BASE_IMG")" -F qcow2 "$overlay"
 }
 
+# The SSH keys of the accounts are the Debian guest's (img/keys, made by its
+# provisioning). When the Guix guest is built first, make them here, in the
+# same way; the provisioning then uses them as they are.
+ensure_keys() {
+    local account key
+    mkdir -p "$SSH_KEY_DIR"
+    chmod 700 "$SSH_KEY_DIR"
+    for account in root peon; do
+        key="$SSH_KEY_DIR/${account}_ed25519"
+        if [[ ! -f "$key" ]]; then
+            need ssh-keygen
+            echo "guix_vm: generating the SSH key of $account"
+            ssh-keygen -q -t ed25519 -N "" -C "$account@hurd" -f "$key"
+        fi
+        chmod 600 "$key"
+        [[ -f "$key.pub" ]] || ssh-keygen -y -f "$key" > "$key.pub"
+    done
+}
+
 cmd_image() {
     need "$GUIX"; need "$QEMU_IMG"; need flock
     require_goonix
     [[ -f "$GUIX_OS" ]] || die "system declaration not found: $GUIX_OS"
+    ensure_keys
     [[ -z "$(qemu_pid)" ]] || die "the guest is running; stop it first (make guix-stop)"
     if [[ -e "$STATE_IMG" ]]; then
         die "$STATE_IMG is a kept disk state on top of the current base image and

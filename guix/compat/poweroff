@@ -1,0 +1,3 @@
+#!/bin/sh
+# Shut the Hurd down. GNU Mach halts; the host stops QEMU afterwards.
+exec /run/current-system/profile/sbin/halt

@@ -5,6 +5,10 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DIR="$(mktemp -d)"
+# Keep the QEMU monitor and QMP sockets of a guest that may be running
+# (they live in XDG_RUNTIME_DIR, named after the SSH port) out of reach.
+export XDG_RUNTIME_DIR="$TEST_DIR/run"
+mkdir -p "$XDG_RUNTIME_DIR"
 export TEST_DIR
 cleanup() {
     if [[ -f "$TEST_DIR/synthetic-pids" ]]; then
@@ -74,7 +78,7 @@ PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" \
     -device virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare > "$TEST_DIR/output" 2>&1
 rc=$?
 
-echo '1..14'
+echo '1..15'
 failures=0
 if (( rc != 0 )); then
     echo 'ok 1 - all synthetic boot attempts time out'
@@ -293,6 +297,26 @@ if (( hung_rc == 0 && hung_time < 10 )); then
 else
     echo "not ok 14 - stop took ${hung_time} s with a hung halt connection (rc $hung_rc)"
     sed 's/^/# /' "$TEST_DIR/hung-halt-output"
+    failures=1
+fi
+# The accounts' SSH keys are created when missing, as the Debian
+# provisioning creates them, before Guix reads their public halves.
+mkdir -p "$TEST_DIR/newkeys-os"
+: > "$TEST_DIR/newkeys-os/os.scm"
+printf '#!/usr/bin/env bash\n[[ "${1:-}" == --version ]] && echo "guix (GNU Guix) 1.5.0-goonix.test"\nexit 0\n' > "$TEST_DIR/bin/guix"
+chmod +x "$TEST_DIR/bin/guix"
+set +e
+PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/newkeys-guix" \
+    GUIX_OS="$TEST_DIR/newkeys-os/os.scm" SSH_KEY_DIR="$TEST_DIR/newkeys" \
+    bash "$REPO_ROOT/scripts/guix_vm.sh" image > "$TEST_DIR/newkeys-output" 2>&1
+set -e
+if [[ -f "$TEST_DIR/newkeys/root_ed25519" && -f "$TEST_DIR/newkeys/peon_ed25519.pub" ]] &&
+   [[ "$(ssh-keygen -y -f "$TEST_DIR/newkeys/peon_ed25519" | cut -d' ' -f1,2)" == "$(cut -d' ' -f1,2 "$TEST_DIR/newkeys/peon_ed25519.pub")" ]] &&
+   [[ "$(stat -c %a "$TEST_DIR/newkeys/root_ed25519")" == 600 ]]; then
+    echo 'ok 15 - image creates missing account SSH keys'
+else
+    echo 'not ok 15 - image did not create the account SSH keys'
+    sed 's/^/# /' "$TEST_DIR/newkeys-output"
     failures=1
 fi
 exit "$failures"
