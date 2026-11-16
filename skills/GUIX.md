@@ -134,8 +134,9 @@ Change the declaration, then `make guix-stop guix-image guix-start`.
 `make guix-start-persist` keeps the disk in `img/guix/state.qcow2`, an
 overlay of the current base image (G8). After an unclean stop, run
 `make guix-repair`: it checks the root filesystem of the kept state with
-`e2fsck`. `make guix-reset-state` deletes the kept state; `make guix-image`
-refuses to replace the base while one exists.
+`e2fsck`, and what the guest had not written yet is lost (`sync` does not
+wait on the Hurd). `make guix-reset-state` deletes the kept state; `make
+guix-image` refuses to replace the base while one exists.
 
 ### When a guest does not answer
 
