@@ -122,10 +122,10 @@ mkdir -p "$GUIX_DIR/tmp" "$SHARE"
 # A reused directory keeps the link of the run that booted its guest.
 [[ -L "$GUIX_DIR/hurd64.base.qcow2" ]] || ln -s "$GUIX_BASE_IMG" "$GUIX_DIR/hurd64.base.qcow2"
 if [[ -z "$P9FS_STORE" ]]; then
-    P9FS_STORE="$($GUIX build --target=x86_64-pc-gnu -f "$REPO_ROOT/guix/9pfs.scm")"
+    P9FS_STORE="$($GUIX build --load-path="$REPO_ROOT/guix/modules" --target=x86_64-pc-gnu -f "$REPO_ROOT/guix/9pfs.scm")"
 fi
 if [[ -z "$VIRTIO_STORE" ]]; then
-    VIRTIO_STORE="$($GUIX build --target=x86_64-pc-gnu -f "$REPO_ROOT/guix/virtio-9p.scm")"
+    VIRTIO_STORE="$($GUIX build --load-path="$REPO_ROOT/guix/modules" --target=x86_64-pc-gnu -f "$REPO_ROOT/guix/virtio-9p.scm")"
 fi
 export P9FS_BIN="$P9FS_STORE/bin/9pfs"
 export VIRTIO_9P_BIN="$VIRTIO_STORE/bin/virtio-9p"

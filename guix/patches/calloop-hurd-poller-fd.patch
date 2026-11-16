@@ -1,0 +1,34 @@
+From: Hurdkit <hurdkit@localhost>
+Subject: [PATCH] calloop: omit poller fd borrowing on Hurd
+
+The polling crate exposes AsRawFd/AsFd only when its backend has a single
+pollable descriptor. Its Hurd backend uses poll over multiple descriptors,
+so these two EventLoop trait implementations cannot be provided. Keep the
+ordinary poll event-loop API available; callers must not attempt to borrow
+a nonexistent poller fd on Hurd.
+---
+ src/loop_logic.rs | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/loop_logic.rs b/src/loop_logic.rs
+index 851e447..ad51d7a 100644
+--- a/src/loop_logic.rs
++++ b/src/loop_logic.rs
+@@ -742,7 +742,7 @@ impl<'l, Data> EventLoop<'l, Data> {
+     }
+ }
+
+-#[cfg(unix)]
++#[cfg(all(unix, not(target_os = "hurd")))]
+ impl<Data> AsRawFd for EventLoop<'_, Data> {
+     /// Get the underlying raw-fd of the poller.
+     ///
+@@ -756,7 +756,7 @@ impl<Data> AsRawFd for EventLoop<'_, Data> {
+     }
+ }
+
+-#[cfg(unix)]
++#[cfg(all(unix, not(target_os = "hurd")))]
+ impl<Data> AsFd for EventLoop<'_, Data> {
+     /// Get the underlying fd of the poller.
+     ///

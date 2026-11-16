@@ -1,0 +1,12 @@
+[package]
+name = "hurdkit-rust-evloop"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+calloop = { version = "=0.14.4", default-features = false }
+polling = "3.11.0"
+rustix = { version = "1.0.0", features = ["pipe"] }
+libc = "0.2.191"

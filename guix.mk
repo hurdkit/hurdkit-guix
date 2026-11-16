@@ -47,7 +47,7 @@ GUIX_VM := env GUIX_OS="$(abspath $(GUIX_OS))" \
 	guix-reset-state guix-authorize-host guix-virtio-test guix-qmp \
 	linux-ref-image linux-ref-start linux-ref-stop linux-ref-status \
 	linux-ref-ssh linux-ref-ssh-peon linux-ref-screenshot linux-ref-qmp \
-	stage0-check stage0-harness-check
+	stage0-check stage0-harness-check stage1-check
 
 # Build guix/hurd64.scm into img/guix/hurd64.base.qcow2
 guix-image:
@@ -140,9 +140,13 @@ stage0-harness-check:
 	@bash tests/guix-vm-retry.t
 	@bash tests/linux-stop.t
 	@bash tests/guix-virtio-lifecycle.t
+	@bash tests/stage1-check.t
 
 stage0-check:
 	@bash scripts/stage0_check.sh
+
+stage1-check:
+	@bash scripts/stage1_check.sh
 
 # Generate the host archive-signing key if needed and trust its public half.
 # SUDO=... is needed on NixOS when /run/wrappers/bin is not in PATH.

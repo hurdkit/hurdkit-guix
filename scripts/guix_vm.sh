@@ -224,7 +224,8 @@ would be corrupt on top of a new one. Remove it first: make guix-reset-state"
     # guix prints the store file name of the image as the last line of its
     # standard output; the build log goes to standard error.
     # shellcheck disable=SC2086
-    store_image="$("$GUIX" system image --image-type="$GUIX_IMAGE_TYPE" \
+    store_image="$("$GUIX" system image --load-path="$REPO_ROOT/guix/modules" \
+        --image-type="$GUIX_IMAGE_TYPE" \
         $GUIX_IMAGE_OPTS --root="$STORE_LINK" "$GUIX_OS" | tail -n 1)"
     [[ -f "$store_image" ]] || die "guix did not produce an image (got: '$store_image')"
     echo "guix_vm: built $store_image"

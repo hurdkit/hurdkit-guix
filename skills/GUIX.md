@@ -131,6 +131,25 @@ uses `VK_DRIVER_FILES` to expose its host ICD. `GPU_VK_DEVICE` and
 reference Mesa does not enable the native AMD context; see the stage-0
 Findings before treating `GUIX_GPU=nctx` as supported.
 
+### Stage 1 Hurd platform
+
+Run `make stage1-check` to build `guix/hurd64-platform.scm`, boot its
+separate guest on port 2226, and run the tmpfs mapping/truncation, event-shim,
+and Rust TAP tests. The script rejects TAP failures and skips and stops its
+guest on both success and failure. The patched Hurd, shim, test programs,
+and crate patches live in this checkout; no goonix or glibc edit is needed.
+The ordinary `guix/hurd64.scm` derivation is unchanged.
+
+### Hurdkit Guile modules
+
+Image and driver builds use `-L guix/modules`. Add package modules below
+`guix/modules/hurdkit/packages/`; do not edit goonix. Check a package with
+`guix build -L guix/modules --target=x86_64-pc-gnu NAME`. If a module fails
+to compile, every image build fails; evaluate its package expression first,
+for example `guix build -L guix/modules -e '(@ (hurdkit packages base)
+hurdkit-hello-c)'`. Keep glibc unchanged: replacing it rebuilds the guest
+rather than supplying a small platform library.
+
 ### Host archive signing
 
 The guest declaration carries the public host signing key. The private key
