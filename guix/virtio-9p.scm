@@ -8,7 +8,8 @@
              (guix build-system gnu)
              ((guix licenses) #:prefix license:)
              (gnu packages hurd)
-             (gnu packages xorg))
+             (gnu packages xorg)
+             (hurdkit packages virtio))
 
 (define %source-directory
   (string-append (getenv "HOME") "/src/virtio"))
@@ -20,6 +21,7 @@
 
 (define-public virtio-9p
   (package
+  (inherit hurdkit-virtio)
   (name "virtio-9p")
   (version (or (getenv "VIRTIO_9P_VERSION") "0-hurdkit"))
   (source (local-file %source-directory "virtio-9p-checkout"
@@ -29,14 +31,8 @@
    (list #:tests? #f
          #:make-flags
          #~(list (string-append "CC=" #$(cc-for-target))
-                 "LIBS=shouldbeinlibc ihash ports iohelp fshelp trivfs pciaccess hurduser machuser irqhelp")
-         #:phases
-         #~(modify-phases %standard-phases
-             (delete 'configure)
-             (replace 'install
-               (lambda _
-                 (install-file "virtio-9p" (string-append #$output "/bin")))))))
-  (native-inputs '())
+                 "LIBS=shouldbeinlibc ihash ports iohelp fshelp trivfs pciaccess hurduser machuser irqhelp")))
+  (native-inputs (package-native-inputs hurdkit-virtio))
   (inputs (list hurd libirqhelp libpciaccess-static))
   (supported-systems '("i586-gnu" "x86_64-gnu"))
   (home-page "https://github.com/hurdkit/virtio")

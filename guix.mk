@@ -47,7 +47,8 @@ GUIX_VM := env GUIX_OS="$(abspath $(GUIX_OS))" \
 	guix-reset-state guix-authorize-host guix-virtio-test guix-qmp \
 	linux-ref-image linux-ref-start linux-ref-stop linux-ref-status \
 	linux-ref-ssh linux-ref-ssh-peon linux-ref-screenshot linux-ref-qmp \
-	stage0-check stage0-harness-check stage1-check
+	stage0-check stage0-harness-check stage1-check \
+	guix-virtio-balloon-test guix-virtio-blk-test
 
 # Build guix/hurd64.scm into img/guix/hurd64.base.qcow2
 guix-image:
@@ -97,6 +98,15 @@ guix-reset-state:
 guix-virtio-test:
 	@GUIX_DIR="$(abspath $(IMG_DIR)/guix/virtio-test)" REUSE="$(REUSE)" \
 		bash scripts/guix_virtio_test.sh
+
+# The newer drivers use a Hurdkit Mach guest, separate from niri's tmpfs.
+# Both matrices run with a disposable boot overlay; blk's data disk is also
+# disposable and is seeded only inside its test directory.
+guix-virtio-balloon-test:
+	@bash scripts/guix_virtio_device_test.sh balloon
+
+guix-virtio-blk-test:
+	@bash scripts/guix_virtio_device_test.sh blk
 
 # Send a QMP command to the running Hurd or Linux reference guest.
 guix-qmp:

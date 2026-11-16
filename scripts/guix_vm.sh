@@ -72,6 +72,12 @@ LOCK_FILE="$GUIX_DIR/.build.lock"
 ROOT_PARTITION="${GUIX_ROOT_PARTITION:-1}"
 GUEST_SSH_PORT="${GUIX_GUEST_SSH_PORT:-2222}"
 GUIX_GUEST_KIND="${GUIX_GUEST_KIND:-hurd}"
+# The virtio matrices share their assertions with the Debian guest. Guix
+# owns the actual lifecycle here: halt reaches Mach but does not stop QEMU.
+export VIRTIO_HALT_COMMAND="${VIRTIO_HALT_COMMAND:-halt}"
+export VIRTIO_NO_POWEROFF=1
+export VIRTIO_NO_SETSID=1
+export VIRTIO_MONITOR_SOCKET="$MONITOR_SOCKET"
 
 die() {
     echo "guix_vm: $*" >&2
@@ -168,7 +174,7 @@ qemu_command() {
     local arg
     for arg in "${extra[@]}"; do
         case "$arg" in
-            -hda|-pidfile|-monitor|-qmp|-serial|-netdev|-daemonize)
+            -hda|-pidfile|-monitor|-qmp|-serial|-netdev|-daemonize|-display)
                 die "QEMU option $arg is managed by guix_vm.sh; do not override it"
                 ;;
         esac
