@@ -1,20 +1,18 @@
 /* Shared memory on a tmpfs: the patterns Wayland clients and shm_open users
    rely on, and the file semantics they must not break.
 
-   Usage: tmpfs-shm [--truncate] DIRECTORY [CYCLES]
-   --truncate adds the cases that shrink and regrow a mapped file: the
-   default pager then loses the page and GNU Mach fails an assertion
-   (vm_map_copyin_page_list: m->wire_count == 1), on a stock Hurd too.
+   Usage: tmpfs-shm DIRECTORY [CYCLES]
    TMPFS_SHM_ONLY=N runs only case N.
 
    Each case runs in a child process, so that a SIGBUS fails that case
    instead of the whole run.  The output is TAP.  It runs on Linux too
    (DIRECTORY=/dev/shm), which checks the expectations themselves.
 
-   Data that the kernel pages out of a tmpfs file is lost on a Hurd without
-   swap ("default pager: data_return write error, losing data"), so these
-   cases keep their files resident: no msync (MS_INVALIDATE), no memory
-   pressure.  */
+   Without the fixes of hurd-shm and gnumach-shm, the shrink cases stop
+   GNU Mach in its debugger (vm_map_copyin_page_list: Assertion
+   `m->wire_count == 1'), and the msync cases lose the pages of a guest
+   that has no swap.  Nothing here puts the guest under memory pressure:
+   without swap, pages that the kernel evicts are still lost.  */
 
 #define _GNU_SOURCE
 #include <errno.h>
@@ -211,6 +209,57 @@ shrink_and_regrow (int keep_link)
   return 0;
 }
 
+/* msync has nothing to write for memory that only the default pager
+   backs, and must not lose it: the data stays, in the mapping and for
+   read, pages that were never touched still read as zeros, and the
+   mapping takes new writes.  With FILE_BACKED the memory is an unlinked
+   file of DIRECTORY, otherwise anonymous shared memory.  */
+static int
+msync_keeps_data (int file_backed)
+{
+  char path[4096];
+  size_t length = 4 * page_size, used = length - page_size;
+  unsigned char *buffer = malloc (length);
+  int fd = -1;
+  if (buffer == NULL)
+    return fail ("malloc");
+  if (file_backed)
+    {
+      fd = new_file (0, path, sizeof path);
+      if (fd < 0 || ftruncate (fd, length) < 0)
+        return fail ("create");
+    }
+  unsigned char *map = mmap (NULL, length, PROT_READ | PROT_WRITE,
+                             MAP_SHARED | (file_backed ? 0 : MAP_ANONYMOUS),
+                             fd, 0);
+  if (map == MAP_FAILED)
+    return fail ("mmap");
+  fill (map, used, 0, 5);
+  if (msync (map, length, MS_SYNC) < 0)
+    return fail ("msync (MS_SYNC)");
+  if (check (map, used, 0, 5))
+    return 1;
+  if (msync (map, length, MS_SYNC | MS_INVALIDATE) < 0)
+    return fail ("msync (MS_SYNC | MS_INVALIDATE)");
+  if (check (map, used, 0, 5))
+    return 1;
+  if (file_backed)
+    {
+      if (pread (fd, buffer, length, 0) != (ssize_t) length)
+        return fail ("pread");
+      if (check (buffer, used, 0, 5))
+        return 1;
+    }
+  for (size_t i = used; i < length; i++)
+    if (map[i] != 0)
+      {
+        fprintf (stderr, "# untouched byte %zu is %u\n", i, map[i]);
+        return 1;
+      }
+  fill (map, length, 0, 6);
+  return check (map, length, 0, 6);
+}
+
 /* A page that lies wholly beyond the end of the file faults (SIGBUS).  */
 static int
 beyond_end_faults (void)
@@ -327,36 +376,41 @@ static int cycles = 100;
 static int shrink_unlinked (void) { return shrink_and_regrow (0); }
 static int shrink_linked (void) { return shrink_and_regrow (1); }
 static int many_cycles (void) { return repeated_cycles (cycles); }
+static int msync_file (void) { return msync_keeps_data (1); }
+static int msync_anonymous (void) { return msync_keeps_data (0); }
+
+static const struct
+{
+  const char *description;
+  int (*test) (void);
+} cases[] = {
+  { "an unlinked file's mapping survives close", mapped_after_close },
+  { "an anonymous shm_open object's mapping survives close", shm_object },
+  { "write then read an unlinked file", write_read_unlinked },
+  { "data survives unmapping and mapping again", unmap_and_remap },
+  { "a page beyond the end of the file faults", beyond_end_faults },
+  { "repeated cycles work and give the space back", many_cycles },
+  { "shrink and regrow an unlinked file: zeros past the cut",
+    shrink_unlinked },
+  { "shrink and regrow a linked mapped file: zeros past the cut",
+    shrink_linked },
+  { "msync keeps the data of a mapped file", msync_file },
+  { "msync keeps the data of anonymous shared memory", msync_anonymous },
+};
 
 int
 main (int argc, char **argv)
 {
-  int truncate_cases = argc > 1 && strcmp (argv[1], "--truncate") == 0;
-  if (truncate_cases)
-    {
-      argc--;
-      argv++;
-    }
   if (argc < 2 || argc > 3 || (argc == 3 && (cycles = atoi (argv[2])) < 1))
     {
-      fprintf (stderr, "usage: tmpfs-shm [--truncate] DIRECTORY [CYCLES]\n");
+      fprintf (stderr, "usage: tmpfs-shm DIRECTORY [CYCLES]\n");
       return 2;
     }
   directory = argv[1];
   page_size = (size_t) sysconf (_SC_PAGESIZE);
-  printf ("TAP version 13\n1..%d\n", truncate_cases ? 8 : 6);
-  run ("an unlinked file's mapping survives close", mapped_after_close);
-  run ("an anonymous shm_open object's mapping survives close", shm_object);
-  run ("write then read an unlinked file", write_read_unlinked);
-  run ("data survives unmapping and mapping again", unmap_and_remap);
-  run ("a page beyond the end of the file faults", beyond_end_faults);
-  run ("repeated cycles work and give the space back", many_cycles);
-  if (truncate_cases)
-    {
-      run ("shrink and regrow an unlinked file: zeros past the cut",
-           shrink_unlinked);
-      run ("shrink and regrow a linked mapped file: zeros past the cut",
-           shrink_linked);
-    }
+  size_t count = sizeof cases / sizeof cases[0];
+  printf ("TAP version 13\n1..%zu\n", count);
+  for (size_t i = 0; i < count; i++)
+    run (cases[i].description, cases[i].test);
   return failures != 0;
 }

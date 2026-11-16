@@ -5,7 +5,9 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-echo '1..2'
+number=0
+ok() { number=$((number + 1)); echo "ok $number - $*"; }
+not_ok() { number=$((number + 1)); echo "not ok $number - $*"; }
 
 lock_rev="$(python3 -I -c '
 import json, sys
@@ -17,16 +19,17 @@ scm_rev="$(sed -n 's/^(define %goonix-commit "\([0-9a-f]*\)")$/\1/p' \
 
 failures=0
 if [[ ${#scm_rev} == 40 && ${#lock_rev} == 40 ]]; then
-    echo 'ok 1 - both pins name a full commit'
+    ok 'both pins name a full commit'
 else
-    echo "not ok 1 - could not read the pins (lock '$lock_rev', guix/goonix.scm '$scm_rev')"
+    not_ok "could not read the pins (lock '$lock_rev', guix/goonix.scm '$scm_rev')"
     failures=1
 fi
 if [[ -n "$lock_rev" && "$scm_rev" == "$lock_rev" ]]; then
-    echo 'ok 2 - guix/goonix.scm builds the goonix commit of nix/flake.lock'
+    ok 'guix/goonix.scm builds the goonix commit of nix/flake.lock'
 else
-    echo "not ok 2 - guix/goonix.scm builds $scm_rev, nix/flake.lock pins $lock_rev"
+    not_ok "guix/goonix.scm builds $scm_rev, nix/flake.lock pins $lock_rev"
     echo '# update %goonix-commit and its hash in guix/goonix.scm (see its header)'
     failures=1
 fi
+echo "1..$number"
 exit "$failures"

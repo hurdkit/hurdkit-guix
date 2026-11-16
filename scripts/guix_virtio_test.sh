@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Run upstream's virtio driver matrices in the Guix GNU/Hurd guest.
+# Run the virtio driver test matrices in the Guix GNU/Hurd guest.
 #
 # Usage: guix_virtio_test.sh 9p|balloon|blk
 #
-# The assertions are upstream's scripts/virtio_test.py,
-# virtio_balloon_test.py and virtio_blk_test.py, unchanged. This wrapper
-# does for the Guix guest what scripts/virtio_*_test.sh do for the Debian
-# one: it boots guix/hurd64-drivers.scm with the device and its QEMU trace
-# events, builds the driver binaries, and hands both to the matrix.
+# Drivers and matrices are Guix packages at pinned commits, see
+# (hurdkit packages virtio): this script never runs the scripts of the
+# working tree, and what it passes to a matrix is what the pinned one
+# expects. It boots guix/hurd64-drivers.scm with the device and its QEMU
+# trace events, builds the driver binaries, and hands both to the matrix.
 #
 # Environment:
 #   REUSE=1        run the matrix against the guest that a failed run left
@@ -16,12 +16,14 @@
 #   GDB=1          ask the matrix for stack traces on failure (needs gdb in
 #                  the guest, which the Guix guest does not have)
 #   VIRTIO_SRC     build the drivers from this checkout of hurdkit/virtio,
-#                  not from the commit (hurdkit packages virtio) pins
+#                  not from the pinned commit
+#   VIRTIO_MATRICES
+#                  run the matrices of this directory, not the pinned ones
 #   GUIX_DIR       image and run directory (default img/guix-drivers)
 #   GUIX_SSH_PORT  forwarded SSH port (default 2231)
 #
-# A failed matrix leaves the guest running for inspection, as upstream's
-# scripts do. After a passing matrix the guest must have shut down cleanly.
+# A failed matrix leaves the guest running for inspection. After a passing
+# matrix the guest must have shut down cleanly.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -56,7 +58,7 @@ export GUIX_OS="$REPO_ROOT/guix/hurd64-drivers.scm"
 export GUIX_MEMORY="${GUIX_MEMORY:-2048}"
 export SSH_KEY_DIR="${SSH_KEY_DIR:-$REPO_ROOT/img/keys}"
 export SSH_HOST="${SSH_HOST:-127.0.0.1}"
-# What the matrices read (see the docstrings of scripts/virtio_*_test.py).
+# What the matrices read (see their docstrings).
 export SSH_PORT="$GUIX_SSH_PORT" SSH_KEY="$SSH_KEY_DIR/root_ed25519"
 export QEMU_LOG="$GUIX_DIR/$device.trace"
 export REUSE GDB="${GDB:-0}" RAM_MB="$GUIX_MEMORY"
@@ -89,14 +91,24 @@ export VIRTIO_BALLOON_BIN="$virtio/bin/virtio-balloon"
 export VIRTIO_BLK_BIN="$virtio/bin/virtio-blk"
 export VBLK_CLIENT_BIN="$virtio/bin/vblk-client"
 export P9FS_BIN="${stores[1]}/bin/9pfs"
+# The matrices run on the host, so they are not built for the guest.
+if [[ -n "${VIRTIO_MATRICES:-}" ]]; then
+    matrices="$(cd "$VIRTIO_MATRICES" && pwd)"
+else
+    matrices="$("$GUIX" build --load-path="$REPO_ROOT/guix/modules" \
+        hurdkit-virtio-matrices)/share/hurdkit-virtio-matrices"
+fi
+[[ -f "$matrices/$matrix" ]] || {
+    echo "guix-virtio-test: there is no $matrix in $matrices" >&2
+    exit 1
+}
 
 device_args=()
 case "$device" in
     9p)
         export SHARE="$GUIX_DIR/share" MOUNT_TAG="${MOUNT_TAG:-hostshare}"
         mkdir -p "$SHARE"
-        # The matrix reads this file in the guest (as scripts/virtio_test.sh
-        # seeds it for the Debian guest).
+        # The matrix reads this file in the guest.
         printf 'from host\n' > "$SHARE/host-seed.txt"
         device_args=(-fsdev "local,id=virtfs0,path=$SHARE,security_model=none"
                      -device "virtio-9p-pci,fsdev=virtfs0,mount_tag=$MOUNT_TAG,disable-legacy=off,addr=0x5")
@@ -110,7 +122,7 @@ case "$device" in
     blk)
         export TEST_DISK="$GUIX_DIR/test-disk.img" DISK_MB="${DISK_MB:-64}"
         if [[ "$REUSE" != 1 || ! -f "$TEST_DISK" ]]; then
-            python3 "$SCRIPT_DIR/virtio_blk_test.py" seed "$TEST_DISK" "$DISK_MB"
+            python3 "$matrices/virtio_blk_test.py" seed "$TEST_DISK" "$DISK_MB"
         fi
         device_args=(-drive "if=none,id=vd0,file=$TEST_DISK,format=raw,cache=writeback"
                      -device "virtio-blk-pci,drive=vd0,disable-legacy=off,addr=0x5")
@@ -132,7 +144,10 @@ if [[ "$REUSE" != 1 ]]; then
     guix_vm start -- "${trace_args[@]}" -D "$QEMU_LOG" "${device_args[@]}"
 fi
 
-if ! python3 "$SCRIPT_DIR/$matrix" "$MODE"; then
+# The matrix runs in GUIX_DIR and gets the trace log without its directory:
+# the balloon matrix connects to the monitor socket next to that log, and
+# the path of a Unix socket must stay short however deep GUIX_DIR is.
+if ! (cd "$GUIX_DIR" && QEMU_LOG="$device.trace" python3 "$matrices/$matrix" "$MODE"); then
     cat >&2 <<EOF
 guix-virtio-test: $device matrix FAILED; the guest is left running.
   QEMU trace: $QEMU_LOG
@@ -144,8 +159,8 @@ EOF
     exit 1
 fi
 
-# A REUSE run leaves the guest running, as upstream's does. Otherwise the
-# matrix ended with poweroff; stop confirms that the Hurd shut down cleanly
+# A REUSE run leaves the guest running. Otherwise the matrix ended with
+# poweroff; stop confirms that the Hurd shut down cleanly
 # (an unclean shutdown fails the run even though the matrix passed).
 if [[ "$REUSE" != 1 ]]; then
     guix_vm stop || {

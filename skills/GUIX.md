@@ -11,15 +11,33 @@ Use this skill for work on the Guix guest (`guix/`, `guix.mk`,
   goonix (our fork of GNU Guix) at a pinned commit.
 - `guix/hurd64.scm`: the system declaration of the guest.
 - `guix/goonix.scm`: goonix as the guest's own Guix (same commit as the lock).
-- `guix.mk` and `scripts/guix_vm.sh`: build and lifecycle commands.
+- `guix.mk`: the make targets of the guest.
+- `scripts/guix_vm.sh`: builds, boots and manages the guest.
 - `img/guix/`: the base image, overlays and logs of the guest.
-- `img/keys/`: the root and peon SSH keys, shared with the Debian guest.
+- `img/keys/`: the SSH keys of the guest's root and peon accounts.
 
 ## Goal
 
 Build and boot a 64-bit GNU/Hurd guest from a declarative Guix system,
-with key-based SSH and safe disposable and persistent overlays. Nothing of
-the Debian pipeline (its images, keys or scripts) is used or changed.
+with key-based SSH.
+
+## Constraints
+
+- The Guix guest and the Debian pipeline do not depend on each other.
+  Nothing of the guest reads a variable of the Makefile or runs a script of
+  the Debian pipeline (`tests/guix-standalone.t` checks that), and the
+  Debian pipeline uses nothing of the guest: the Makefile only includes
+  `guix.mk`. The two share `img/keys/`.
+- Whatever the guest needs from another repository, or from this one's
+  other half, is a Guix package or origin at a pinned commit with its hash.
+  A pin moves only when someone moves it, so a change elsewhere cannot
+  break a Guix target.
+- This document states no counts, durations, versions or test results. A
+  pin or a default that moves must not make it wrong: name the variable or
+  the command that tells instead.
+- Never edit goonix for this work, and never change the guest's glibc:
+  every package links against it, so a changed glibc rebuilds the whole
+  guest locally.
 
 ## Procedure
 
@@ -36,10 +54,14 @@ nix develop ./nix#guix
 guix system image --image-type=hurd64-qcow2 guix/hurd64.scm
 ```
 
+The declaration reads the accounts' public keys from `img/keys/`
+(`root_ed25519.pub`, `peon_ed25519.pub`); `ssh-keygen -q -t ed25519 -N ''
+-f img/keys/root_ed25519` creates a missing pair.
+
 `guix system image` prints the image in the store: a read-only, compressed
-qcow2. The first build on a machine cross-compiles goonix for the guest
-(about 15 minutes with 16 cores); everything else is downloaded from the
-build farm. Boot it without changing it:
+qcow2. The first build on a machine cross-compiles goonix for the guest;
+everything else is downloaded from the build farm. Boot it without changing
+it:
 
 ```sh
 qemu-system-x86_64 -M q35 -enable-kvm -m 2048 -snapshot -hda IMAGE \
@@ -49,7 +71,6 @@ ssh -i img/keys/root_ed25519 -p 2223 root@127.0.0.1 guix --version
 ```
 
 The guest's `guix --version` prints the same goonix line as on the host.
-`make guix-test` runs the TAP tests of `tests/`.
 
 ### Host daemon
 
@@ -73,51 +94,6 @@ To move the goonix pin, update `nix/flake.lock` (`nix flake update goonix
 --flake ./nix`), the system flake's lock, and `%goonix-commit` with its
 hash in `guix/goonix.scm`; `tests/goonix-pin.t` compares the last two.
 
-### Boot and manage the guest
-
-```sh
-make guix-image
-make guix-start
-make guix-ssh
-make guix-ssh-peon
-make guix-stop
-```
-
-`make guix-image` builds the image as above, converts it into
-`img/guix/hurd64.base.qcow2` and creates the accounts' SSH keys in
-`img/keys/` if the Debian provisioning has not; a second run reports that it
-is up to date. It refuses a `guix` whose first `--version` line lacks
-`goonix`.
-
-`make guix-start` boots a disposable overlay of the base image, waits for a
-successful SSH login on host port 2223 and retries a boot that does not
-answer within 180 seconds, up to three boots (G15). `make guix-status` says
-whether the guest runs and answers. `make guix-stop` sends `halt` over SSH,
-waits for GNU Mach's shutdown marker in the serial log, then stops QEMU,
-because a Hurd halt does not power the machine off (G16); about 20 seconds.
-A forced stop without that marker returns failure.
-
-### Rebuild and persistent state
-
-Change the declaration, then `make guix-stop guix-image guix-start`.
-
-`make guix-start-persist` keeps the disk in `img/guix/state.qcow2`, an
-overlay of the current base image (G8). After an unclean stop, run
-`make guix-repair`. `make guix-reset-state` deletes the kept state;
-`make guix-image` refuses to replace the base while one exists.
-
-### When a guest does not answer
-
-Read `img/guix/serial-N.log` (`.serial-current` names the active boot;
-`serial.log` keeps the last one after stop) and save the screen with
-`make guix-screenshot` (`img/guix/screen.ppm`). `bash scripts/guix_vm.sh
-monitor 'info pci'` talks to the QEMU monitor. A boot that times out gets a
-fresh overlay; a kept state is repaired before the next attempt.
-
-`make guix-test` runs the TAP tests of the scripts (`tests/*.t`); they boot
-nothing and use fake QEMU, SSH and Guix commands. `tests/guix-packages.t`
-evaluates every package and system declaration with goonix.
-
 ### Host archive signing
 
 `guix/hurd64.scm` authorizes the host's archive signing key,
@@ -128,34 +104,90 @@ without `/run/wrappers/bin` in `PATH`, add
 `GUIX_SUDO=/run/wrappers/bin/sudo`. An image built before the key existed
 does not trust it: rebuild the image.
 
+### Boot and manage the guest
+
+```sh
+make guix-image guix-start    # build, then boot and wait for SSH
+make guix-ssh                 # a root shell; guix-ssh-peon for peon
+make guix-stop
+```
+
+`make guix-image` builds the image as above, converts it into
+`img/guix/hurd64.base.qcow2` and creates the accounts' SSH keys in
+`img/keys/` when they are missing; a second run reports that it is up to
+date. It refuses a `guix` whose first `--version` line lacks `goonix`
+(`GUIX_ANY_VERSION=1` overrides that for experiments).
+
+`make guix-start` boots a disposable overlay of the base image, waits for a
+successful SSH login on the host port `GUIX_SSH_PORT`, and boots again when
+a boot does not answer in time (G15). `make guix-status` says whether the
+guest runs and answers. `make guix-stop` sends `halt` over SSH, waits for
+GNU Mach's shutdown marker in the serial log, then stops QEMU, because a
+Hurd halt does not power the machine off (G16). A forced stop without that
+marker returns failure. The variables at the top of `guix.mk` and of
+`scripts/guix_vm.sh` say what can be set, with their defaults.
+
+### Rebuild and persistent state
+
+Change the declaration, then `make guix-stop guix-image guix-start`.
+
+`make guix-start-persist` keeps the disk in `img/guix/state.qcow2`, an
+overlay of the current base image (G8). After an unclean stop, run
+`make guix-repair`: it checks the root filesystem of the kept state with
+`e2fsck`. `make guix-reset-state` deletes the kept state; `make guix-image`
+refuses to replace the base while one exists.
+
+### When a guest does not answer
+
+Read `img/guix/serial-N.log` (`.serial-current` names the active boot;
+`serial.log` keeps the last one after stop) and save the screen with
+`make guix-screenshot` (`img/guix/screen.ppm`). `bash scripts/guix_vm.sh
+monitor 'info pci'` talks to the QEMU monitor. A boot that times out gets a
+fresh overlay; a kept state is repaired before the next attempt.
+
 ### Package modules, GNU Mach and Hurd variants
 
 Packages of this repository are Guile modules under `guix/modules/hurdkit/`;
 `guix_vm.sh` and the test scripts pass `-L guix/modules`. Build one with
 `guix build -L guix/modules --target=x86_64-pc-gnu NAME`. A module that
 does not compile breaks every image build: `make guix-test` (its
-`guix-packages.t`) shows which. Never edit goonix for this, and never
-change the guest's glibc: every package links against it, so a changed
-glibc rebuilds the whole guest locally.
+`guix-packages.t`) shows which.
 
-`(hurdkit packages hurd)` has GNU Mach and the Hurd at the commits the
-toolchain builds: `gnumach-hurdkit` (Hurdkit's GNU Mach, with its
-shared-interrupt fixes) and `hurd-hurdkit`. Guix needs fixed commits, while
-`toolchain/pins.mk` follows the `hurdkit` branch of the GNU Mach fork: move
-the commits in the module forward with it. `hurd-hurdkit` carries two
-compatibility patches for goonix's older rumpkernel and GNU Mach headers,
-and builds serially (G23).
+`(hurdkit packages hurd)` has `gnumach-hurdkit` (Hurdkit's GNU Mach, with
+its shared-interrupt fixes) and `hurd-hurdkit`, a newer Hurd, each at a
+commit that the module pins. `hurd-hurdkit` carries two compatibility
+patches for goonix's older rumpkernel and GNU Mach headers, and builds
+serially (G23).
 
 `operating-system-with-hurd` from `(hurdkit system)` replaces the Hurd of a
 system: the boot servers, and also `pfinet`, the console, getty and login,
 whose services otherwise keep starting goonix's default Hurd. In such a
 guest, `ps -ef` shows every translator from the one Hurd.
+`guix/hurd64-hurdkit.scm` is the guest with both.
+
+### niri platform guest
+
+`make stage1-check` builds `guix/hurd64-platform.scm` into
+`img/guix-platform/`, boots it on its own port and runs the platform's test
+programs in it; `scripts/stage1_check.sh` lists them. The guest has:
+
+- `hurd-tmpfs-mapped`, which is `hurd-hurdkit` with
+  `guix/patches/hurd-tmpfs-keep-mapped.patch`: when the last reference to
+  an unlinked file goes away, tmpfs no longer shrinks its memory object to
+  zero, so the file's mappings keep working. `tmpfs-shm DIRECTORY`
+  (`tests/hurd/tmpfs-shm.c`) checks it on `/dev/shm`, and on ext2 as the
+  control; it also runs on Linux.
+- `hurd-shm` and `gnumach-shm`, which add the fixes that shared memory on a
+  tmpfs needs from the default pager and from GNU Mach (G22).
+- `hurd-epoll-shim`, the epoll, eventfd, timerfd and signalfd library for
+  the libwayland port, with its TAP suites (`hurd-epoll-shim-test-NAME`).
+  It lives in its own repository, github.com/hurdkit/hurd-epoll-shim, and
+  `(hurdkit packages base)` pins the commit.
+- `hurdkit-rust-hello` and the `hurdkit-rust-evloop` TAP test (calloop and
+  polling on the Hurd), built by goonix's cargo build system once the Rust
+  standard library builds for the Hurd (`(hurdkit packages rust)`).
 
 ### Driver tests
-
-Upstream's driver matrices (`scripts/virtio_test.py`,
-`virtio_balloon_test.py`, `virtio_blk_test.py`) run unchanged in a Guix
-guest:
 
 ```sh
 make guix-virtio-test          # virtio-9p and 9pfs
@@ -163,26 +195,18 @@ make guix-virtio-balloon-test
 make guix-virtio-blk-test
 ```
 
-`scripts/guix_virtio_test.sh` builds `guix/hurd64-drivers.scm` (the guest
-with Hurdkit's GNU Mach, the drivers and `setsid` and `poweroff`, which the
-matrices expect from a Debian guest) into `img/guix-drivers/`, builds the
-drivers (`hurdkit-virtio` at the commit `(hurdkit packages virtio)` pins,
-and `hurd-9pfs`), boots the guest on port 2231 with the device and its
-QEMU trace events, and runs the matrix. After a passing matrix the guest has
-to shut down cleanly; after the 9p matrix it does not (G20), so
-`make guix-virtio-test` fails at that point even when all assertions pass.
-A failed matrix leaves the guest running and prints how to reach it;
-`REUSE=1` runs the matrix again on that guest (after the 9p matrix, only
-once its translators are gone). `VIRTIO_SRC=~/src/virtio` builds the drivers
-from a local checkout instead.
+Each target runs one test matrix of Hurdkit's virtio drivers against a
+separate, disposable guest (`guix/hurd64-drivers.scm`, `img/guix-drivers/`).
+Drivers and matrices are Guix packages of `(hurdkit packages virtio)` at
+pinned commits: `scripts/guix_virtio_test.sh` runs that snapshot of the
+matrices and never the scripts of the working tree, so work on those cannot
+break these targets. To test newer drivers or matrices, move the pins in
+the module and adapt `guix_virtio_test.sh` to what the new matrices expect;
+`VIRTIO_SRC=DIR` and `VIRTIO_MATRICES=DIR` try a local checkout first.
 
-The guest also has `9pfs` for a host directory over TCP: start
-`python3 toolchain/9p-server.py DIR 127.0.0.1:1564` on the host (G21), then
-`settrans -c /host "$(command -v 9pfs)" 10.0.2.2:1564` in the guest.
-
-Binaries of hurdkit's standalone cross toolchain do not run in the Guix
-guest: it has no `/lib/ld-x86-64.so.1`. Drivers are therefore Guix packages,
-built against the guest's own libraries.
+After a passing matrix the guest has to shut down cleanly. A failed matrix
+leaves the guest running and prints how to reach it; `REUSE=1` runs the
+matrix again on that guest.
 
 ### Graphics harness
 
@@ -216,52 +240,30 @@ make linux-ref-qmp GUIX_QMP_ARGS='key super+t'
 make linux-ref-stop
 ```
 
-It uses host port 2224 and `img/guix-linux/`. `linux-ref-screenshot` takes
-the picture through niri's IPC, because QMP `screendump` cannot read an
+It has its own port and `img/guix-linux/`. `linux-ref-screenshot` takes the
+picture through niri's IPC, because QMP `screendump` cannot read an
 accelerated scanout. `make stage0-check` is the live gate: the Hurd guest
-boots and stops cleanly, and for each GPU in `STAGE0_GPUS` (default `amd
-nvidia`) and path (virgl, and Venus for `STAGE0_VENUS_GPUS`) the reference
-reports that GPU as renderer, runs glmark2, takes screenshots, opens foot by
-QMP keys and stops cleanly. Artifacts go to `img/stage0/`.
-
-### niri platform guest
-
-`make stage1-check` builds `guix/hurd64-platform.scm` (Hurdkit's GNU Mach,
-`hurd-tmpfs-mapped`, the epoll shim and the platform's test programs) into
-`img/guix-platform/`, boots it on port 2226 and runs in it:
-
-- `tmpfs-shm /dev/shm 100`, and `/tmp` (ext2) as the control: mappings of
-  unlinked files survive close, data survives write and read and remapping,
-  a page beyond the end of the file faults, and space is given back;
-- the TAP suites of `hurd-epoll-shim` (`hurd-epoll-shim-test-NAME`), the
-  epoll, eventfd, timerfd and signalfd library for the libwayland port, which
-  lives in its own repository, github.com/hurdkit/hurd-epoll-shim;
-- `hurdkit-rust-hello` and the `hurdkit-rust-evloop` TAP test (calloop and
-  polling on the Hurd).
-
-`hurd-tmpfs-mapped` is `hurd-hurdkit` with
-`guix/patches/hurd-tmpfs-keep-mapped.patch`: when the last reference to an
-unlinked file goes away, tmpfs no longer shrinks its memory object to zero,
-so the file's mappings keep working.
+boots and stops cleanly, and for each GPU in `STAGE0_GPUS` and path (virgl,
+and Venus for `STAGE0_VENUS_GPUS`) the reference reports that GPU as
+renderer, runs glmark2, takes screenshots, opens foot by QMP keys and stops
+cleanly. Artifacts go to `img/stage0/`.
 
 ## Pitfalls
 
 **G1. An image built by another Guix is a different system.** Another
 `guix` can come first in `PATH`, for example one installed by `guix pull`
 into `~/.config/guix/current`. Its package graph differs, so the image
-differs from the declared one even with identical files. `guix_vm.sh image`
-and `guix_virtio_test.sh` refuse a `guix` whose first `--version` line
-lacks `goonix` (`GUIX_ANY_VERSION=1` overrides that for experiments).
+differs from the declared one even with identical files. Check that the
+first line of `guix --version` contains `goonix`.
 
 **G2. Substitutes exist only for commits the build farm built.** GNU Mach,
 the Hurd, glibc and the cross toolchain of the guest are downloaded
 pre-built because goonix has the package definitions of an upstream Guix
 commit that the farm built. A goonix commit that changes those definitions
-makes Guix build a toolchain and a C library locally: hours. Check before a
-long wait: `guix system image --dry-run --image-type=hurd64-qcow2
-guix/hurd64.scm` lists configuration files, `goonix-…` and nothing named
-`gcc-…`, `glibc-…`, `hurd-…` or `gnumach-…`. The variants of
-`(hurdkit packages hurd)` are always built here (minutes).
+makes Guix build a toolchain and a C library locally, which takes hours.
+Check before a long wait: `guix system image --dry-run
+--image-type=hurd64-qcow2 guix/hurd64.scm` lists configuration files,
+`goonix-…` and nothing named `gcc-…`, `glibc-…`, `hurd-…` or `gnumach-…`.
 
 **G3. Our image itself cannot be downloaded.** Its derivation differs from
 the build farm's, so its store path does too. The packages inside are the
@@ -281,9 +283,6 @@ exactly like a guest that is still booting.
 **G6. The 64-bit guest needs `-M q35`.** The default machine type gives the
 64-bit Hurd memory problems.
 
-**G7. The root filesystem is partition 1.** A Guix GNU/Hurd image has one
-partition: `bash scripts/repair_filesystem.sh IMAGE 1`.
-
 **G8. A kept state is tied to one base image.** `img/guix/state.qcow2`
 stores only the blocks that differ from the base. On a new base it
 describes a disk that no longer exists and the guest sees a corrupt
@@ -299,8 +298,7 @@ keeps it from the garbage collector with `--root=` (the link
 boot the store file without `-snapshot`.
 
 **G11. The guest has little free disk space.** The image is sized to its
-content, with about 200 MB free. Set `GUIX_IMAGE_OPTS := --image-size=8G`
-when you need room.
+content. Set `GUIX_IMAGE_OPTS=--image-size=8G` when you need room.
 
 **G13. Parallel heavy jobs make everything look hung.** Building goonix or
 an image while a guest runs saturates the disk, and `nix develop` waits
@@ -310,14 +308,15 @@ silently on a store lock. Run heavy steps one after another; `cat
 **G14. An open port is not a ready guest.** QEMU accepts the forwarded port
 at once. Only a successful login proves the guest is up.
 
-**G15. The guest sometimes hangs at boot, in the network setup.** Between a
-fifth and a third of the boots sit idle after `Service file-systems has
-been started.`; sshd never starts and SSH fails with `Connection timed out
-during banner exchange`. A good boot prints `irq handler [11]: new delivery
-port … for /hurd/netdde(…)` right after that line (netdde, the network card
-driver, starting when `pfinet` opens `eth0`); a hung boot never does. The
-cause is not known. `guix_vm.sh start` stops a boot without SSH after
-`GUIX_BOOT_TIMEOUT` (180 s) and tries again, up to `GUIX_BOOT_ATTEMPTS` (3).
+**G15. The guest sometimes hangs at boot, in the network setup.** Such a
+boot sits idle after `Service file-systems has been started.`; sshd never
+starts and SSH fails with `Connection timed out during banner exchange`. A
+good boot prints `irq handler [11]: new delivery port … for
+/hurd/netdde(…)` right after that line (netdde, the network card driver,
+starting when `pfinet` opens `eth0`); a hung boot never does. The cause is
+not known. `guix_vm.sh start` stops a boot without SSH after
+`GUIX_BOOT_TIMEOUT` seconds and tries again, `GUIX_BOOT_ATTEMPTS` times in
+all.
 
 **G16. `halt` does not power the virtual machine off.** GNU Mach prints
 `Shutdown completed successfully, now in tight loop.` on its console, which
@@ -331,70 +330,42 @@ information, so `guix` prints it every time. See G1.
 with `failed to create GC root`, so `guix_vm.sh image` removes the old link
 first. A link renamed after the build no longer protects the image.
 
-**G19. A Unix socket path has at most 107 bytes.** The monitor and QMP
-sockets therefore live in `$XDG_RUNTIME_DIR`, named after the SSH port.
+**G19. A Unix socket path has at most 107 bytes.** The sockets that talk
+to QEMU therefore live in `$XDG_RUNTIME_DIR`, named after the SSH port.
 
 **G20. After 9pfs has been used, `halt` may not finish.** In guests in
 which a 9pfs translator ran, sshd stops on `halt` but GNU Mach's shutdown
 marker often never comes, also after `settrans -g`. The cause is not known.
-`guix_vm.sh stop` stops QEMU after 60 seconds and exits nonzero; with a kept
-state, run `make guix-repair` before the next persistent boot.
+`guix_vm.sh stop` then stops QEMU and exits nonzero, so `make
+guix-virtio-test` fails at that point even when its matrix passed; with a
+kept state, run `make guix-repair` before the next persistent boot.
 
-**G21. Mount 9pfs over TCP only after the server is up.** If 9pfs connects
-before `toolchain/9p-server.py` listens, it exits and every access fails
-with `Translator died`. Wait for `9p-server: serving …`, and after a dead
-mount run `settrans -g -f /host` before mounting again.
-
-**G22. The guest has no swap, and its default pager loses data.** A page of
-a tmpfs file (or of anonymous memory) that leaves memory cannot be written
-anywhere: the serial log shows `(default pager): data_return write error,
-losing data`, and later accesses fault. GNU Mach can then fail
-`vm_map_copyin_page_list: Assertion 'm->wire_count == 1'` and stop in its
-debugger. `msync(MS_INVALIDATE)` on a tmpfs file triggers it, and so does
-shrinking a mapped tmpfs file and growing it again (`tmpfs-shm
---truncate`), with goonix's Hurd and GNU Mach as with Hurdkit's.
+**G22. The guest has no swap.** Pages that GNU Mach evicts under memory
+pressure go to the default pager, which has nowhere to write them: the
+serial log shows `(default pager): data_return write error, losing data`,
+and every later page-in of that memory object fails (SIGBUS). The same two
+lines after a tmpfs file is deleted are harmless: the kernel returns the
+dirty pages of an object that is going away. `hurd-shm` and `gnumach-shm`
+fix the two cases that lost shared memory without any memory pressure: a
+tmpfs file truncated in the middle of a resident page stopped GNU Mach in
+its debugger (`vm_map_copyin_page_list: Assertion 'm->wire_count == 1'`),
+and `msync` moved the pages of tmpfs files and anonymous shared memory to
+the default pager. Their patches are in `guix/patches/`.
 
 **G23. The newer Hurd's `make -j` is racy.** `utils/` fails with `No rule to
 make target 'auth_requestUser.stamp'`, often enough that `hurd-hurdkit`
-builds serially: about four minutes instead of one.
+builds serially.
 
 ## Verification
 
-On 2026-11-16, with goonix `630ee30` on host, shell and guest:
+Run these in `nix develop ./nix#guix`. Each command exits with zero status
+when its checks pass and prints what failed otherwise.
 
-- `make guix-test` passes all suites (they boot nothing), and
-  `guix system image --image-type=hurd64-qcow2 guix/hurd64.scm` builds the
-  image (`make guix-image` builds the same derivation).
-- `make guix-image guix-start guix-ssh guix-ssh-peon guix-stop`:
-  the guest's `guix --version` is `1.5.0-goonix.630ee30`, peon logs in with
-  its key, the stop is clean and `make guix-status` then prints `stopped`.
-  The network-setup hang of G15 hit several boots during the day; the retry
-  recovered every one.
-- `guix/hurd64-hurdkit.scm` builds, boots and stops cleanly, and
-  `ps -ef` shows every Hurd server (auth, proc, pfinet, pflocal, term,
-  random, startup) from `hurd-hurdkit`. `tests/guix-packages.t` evaluates all
-  16 packages and declarations.
-- `make guix-virtio-balloon-test` passes 22/22 and
-  `make guix-virtio-blk-test` 24/24, each followed by a clean shutdown.
-  `make guix-virtio-test` (9p) passes 24/24, then the guest does not halt
-  (G20), so the target fails, as it should.
-- The Hurd guest with the default `GUIX_GPU=none` boots, its
-  VGA console is saved through QMP (`make guix-screenshot`, 640x400) and it
-  stops cleanly (the first part of `make stage0-check`).
-- `STAGE0_GPUS=nvidia STAGE0_VENUS_GPUS=nvidia make stage0-check`
-  passes 12/12 (AMD was not part of this run). With virgl and with Venus,
-  niri runs as peon on `virgl (NVIDIA GeForce RTX 3080 Laptop GPU/PCIe/SSE2)`
-  and `Virtio-GPU Venus (NVIDIA GeForce RTX 3080 Laptop GPU)`, glmark2 runs,
-  Super+T over QMP opens foot (55.6% of the screen changes) and the guest
-  powers off cleanly. Ten seconds of the idle desktop, traced, contain no
-  virtio-gpu command.
-- On goonix's stock Hurd, `tmpfs-shm /dev/shm` fails cases 1 and 2
-  (SIGBUS after close); with `hurd-tmpfs-mapped` all 6 cases pass on
-  `/dev/shm` (100 cycles) and on ext2.
-- `hurdkit-rust-hello` and the 8 assertions of `hurdkit-rust-evloop`
-  pass in the platform guest.
-- `make stage1-check` passes: tmpfs, the eventfd (46), epoll (67),
-  timerfd (36) and signalfd (30) suites, with only the documented skips
-  (`EPOLLRDHUP` on sockets, `CLOCK_BOOTTIME`, the signal sender), and the Rust
-  tests; the guest then shuts down cleanly. All seven suites of the library
-  passed five times in a row in the guest.
+| Check | Command |
+|---|---|
+| Scripts and declarations (boots nothing) | `make guix-test` |
+| The guest boots, answers and halts | `make guix-image guix-start guix-ssh-peon guix-stop` |
+| The guest with Hurdkit's GNU Mach and Hurd | `GUIX_DIR=$PWD/img/guix-hurdkit GUIX_SSH_PORT=2225 GUIX_OS=$PWD/guix/hurd64-hurdkit.scm bash scripts/guix_vm.sh image`, then `start`, `ssh root ps -ef` and `stop` the same way |
+| The platform guest's tests | `make stage1-check` |
+| The driver matrices | `make guix-virtio-test guix-virtio-balloon-test guix-virtio-blk-test` (see G20 for the first) |
+| The graphics gate | `make stage0-check` |

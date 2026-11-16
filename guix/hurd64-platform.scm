@@ -1,6 +1,6 @@
 ;; The Hurd guest of the niri plan's stage 1 (make stage1-check):
-;; guix/hurd64.scm with Hurdkit's GNU Mach, the Hurd with the tmpfs fix,
-;; the event shim and the platform's test programs. Build it with -L
+;; guix/hurd64.scm with the GNU Mach, the Hurd and the libraries that the
+;; Wayland stack needs, and their test programs. Build it with -L
 ;; guix/modules, as scripts/guix_vm.sh does.
 (use-modules (gnu)
              (hurdkit system)
@@ -10,11 +10,13 @@
              (hurdkit packages tests))
 
 (define os
-  (operating-system-with-hurd (load "hurd64.scm") hurd-tmpfs-mapped
-                              #:kernel gnumach-hurdkit))
+  (operating-system-with-hurd (load "hurd64.scm") hurd-shm
+                              #:kernel gnumach-shm))
 
 (operating-system
   (inherit os)
-  (packages (append (list hurd-epoll-shim hurdkit-tmpfs-shm
-                          hurdkit-rust-hello hurdkit-rust-evloop)
+  (packages (append (list hurdkit-tmpfs-shm
+                          hurd-epoll-shim
+                          hurdkit-rust-hello
+                          hurdkit-rust-evloop)
                     (operating-system-packages os))))

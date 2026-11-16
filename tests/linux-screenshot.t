@@ -26,7 +26,6 @@ printf 'P6\n1 1\n255\n\000\000\000' > "${!#}"
 SH
 chmod +x "$TEST_DIR/bin/"*
 printf '%s\n' "$$" > "$TEST_DIR/guest/qemu.pid"
-echo '1..6'
 PATH="$TEST_DIR/bin:$PATH" TEST_DIR="$TEST_DIR" \
     GUIX_DIR="$TEST_DIR/guest" GUIX_SSH_PORT=2224 \
     SSH_KEY_DIR="$TEST_DIR/keys" GUIX_GUEST_KIND=linux GUIX_GPU=virgl \
@@ -47,6 +46,7 @@ check_numbered 'guest capture discovers the niri IPC socket' grep -q 'NIRI_SOCKE
 check_numbered 'host transfer uses the peon SSH identity' grep -q 'peon_ed25519' "$TEST_DIR/scp-command"
 check_numbered 'host conversion produces PPM' grep -q 'ppm' "$TEST_DIR/magick-command"
 check_numbered 'requested output file is returned' grep -q "$TEST_DIR/result.ppm" "$TEST_DIR/output"
+echo "1..$number"
 [[ "$rc" == 0 ]] || { sed 's/^/# /' "$TEST_DIR/output"; exit 1; }
 grep -q 'niri msg action screenshot-screen' "$TEST_DIR/ssh-command" &&
 grep -q 'NIRI_SOCKET' "$TEST_DIR/ssh-command" &&

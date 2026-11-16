@@ -37,7 +37,7 @@ for package in "${packages[@]}"; do
         "$GUIX" build -L guix/modules --target=x86_64-pc-gnu -n "$package"
 done
 # The declarations read the accounts' public keys from img/keys, which
-# make guix-image (or the Debian provisioning) creates.
+# make guix-image creates.
 skip_systems=
 [[ -f img/keys/root_ed25519.pub && -f img/keys/peon_ed25519.pub ]] ||
     skip_systems="no img/keys yet (make guix-image creates them)"

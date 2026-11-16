@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: 7778777 <7778777@7778777.online>
+Date: Mon, 16 Nov 2026 22:19:40 +0100
+Subject: [PATCH 1/2] vm: copy pages being laundered instead of stealing them
+
+vm_pageout_setup wires a page that goes to the default memory manager,
+and the manager's map wires it again, since the manager wires its whole
+address space (vm_wire_all).  When the manager sends such a page on with
+the deallocate bit, vm_map_copyin_page_list tries to steal a page that
+is wired twice:
+
+  vm_map_copyin_page_list: Assertion `m->wire_count == 1' failed.
+
+Without assertions the page is stolen with its laundry bit still set,
+and vm_page_laundry_count is never decremented for it.
+
+mach-defpager does this when a file of a tmpfs is truncated to a size
+that is not a multiple of the page size, and the last page is resident
+and dirty: it clears the end of the returned page and supplies it again.
+
+* vm/vm_map.c (vm_map_copyin_page_list): Do not steal a page whose
+laundry bit is set; it is copied, and vm_map_delete frees the original.
+---
+ vm/vm_map.c | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/vm/vm_map.c b/vm/vm_map.c
+index a0f98702..7be3c84d 100644
+--- a/vm/vm_map.c
++++ b/vm/vm_map.c
+@@ -4347,6 +4347,7 @@ retry:
+ 			 *	      the object is temporary, and
+ 			 *	      not shared.
+ 			 *	(2) The page is not precious.
++			 *	(3) The page is not being laundered.
+ 			 *
+ 			 *	The not shared check consists of two
+ 			 *	parts:  (a) there are no objects that
+@@ -4362,6 +4363,13 @@ retry:
+ 			 *	Stealing wired pages requires telling the
+ 			 *	pmap module to let go of them.
+ 			 *
++			 *	A page being laundered was wired by
++			 *	vm_pageout_setup, on top of the wiring of
++			 *	the default memory manager's map, and stays
++			 *	so until the manager frees it.  Such a page
++			 *	is copied, and vm_map_delete then frees the
++			 *	original like any other.
++			 *
+ 			 *	NOTE: stealing clean pages from objects
+ 			 *  	whose mappings survive requires a call to
+ 			 *	the pmap module.  Maybe later.
+@@ -4374,7 +4382,8 @@ retry:
+ 			    src_object->temporary &&
+ 			    (!src_object->shadowed) &&
+ 			    (!src_object->use_shared_copy) &&
+-			    !m->precious) {
++			    !m->precious &&
++			    !m->laundry) {
+ 				vm_offset_t	page_vaddr;
+ 
+ 				page_vaddr = src_start + (i * PAGE_SIZE);
+-- 
+2.56.0
+

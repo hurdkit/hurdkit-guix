@@ -29,6 +29,6 @@
     (home-page "https://github.com/hurdkit/hurdkit")
     (synopsis "Test shared memory on a tmpfs")
     (description "@command{tmpfs-shm DIRECTORY} checks, with TAP output,
-that mappings of unlinked files survive close, that data survives write and
-read, remapping and msync, and the truncation semantics of a tmpfs.")
+what shared memory needs from the tmpfs in DIRECTORY.  Its source lists
+the cases.")
     (license license:gpl3+)))

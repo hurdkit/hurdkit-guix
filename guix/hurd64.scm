@@ -4,8 +4,8 @@
 ;;
 ;;     guix system image --image-type=hurd64-qcow2 guix/hurd64.scm
 ;;
-;; The public SSH keys of the accounts are read from img/keys/, the same
-;; key pairs that the Debian pipeline uses (make provision creates them).
+;; The public SSH keys of the accounts are read from img/keys/
+;; (root_ed25519.pub and peon_ed25519.pub).
 
 (use-modules (gnu) (gnu system hurd))
 (use-service-modules ssh)

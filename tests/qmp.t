@@ -19,7 +19,6 @@ for unused in {1..100}; do [[ -s "$TEST_DIR/address" ]] && break; sleep 0.02; do
 qmp() {
     QMP_SOCKET="$TEST_DIR/qmp.sock" tclsh "$REPO_ROOT/scripts/qmp.tcl" "$@"
 }
-echo '1..20'
 failures=0
 number=0
 check() {
@@ -54,4 +53,5 @@ check 'trace events can be enabled' qmp trace on 'virtio_gpu_cmd_*'
 check 'trace enable uses a JSON boolean' grep -Eq '"enable" *: *true' "$TEST_DIR/requests.jsonl"
 check 'quit is sent as a QMP command' qmp quit
 check_fails 'server errors fail the command' qmp execute {{"execute":"no-such-command","id":"probe-1"}}
+echo "1..$number"
 exit "$failures"

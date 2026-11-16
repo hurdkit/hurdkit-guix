@@ -3,7 +3,6 @@
 set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OPTIONS="$REPO_ROOT/scripts/guix_qemu_options.sh"
-echo '1..28'
 failures=0
 number=0
 declare -a RESULT=()
@@ -151,4 +150,5 @@ test_dir="$(mktemp -d)"
 check 'Venus selects the host GPU through its Vulkan device-select layer' venus_selects_host_gpu "$test_dir"
 rm -rf "$test_dir"
 check 'explicit Vulkan device selector is validated' bash -c "source '$OPTIONS'; GUIX_GPU=venus GUIX_HOST_GPU=amd GUIX_VK_DEVICE=bogus; ! guix_qemu_options >/dev/null 2>&1"
+echo "1..$number"
 exit "$failures"

@@ -1,6 +1,8 @@
-;;; Drivers under test in the Guix Hurd guest, and what upstream's Debian
-;;; test harness expects from a guest.
+;;; The drivers under test in the Guix Hurd guest, their test matrices, and
+;;; what those expect from a guest. Everything here is pinned: the scripts of
+;;; the working tree are not used, so changing them cannot break these tests.
 (define-module (hurdkit packages virtio)
+  #:use-module (guix build-system copy)
   #:use-module (guix build-system gnu)
   #:use-module (guix build-system trivial)
   #:use-module (guix gexp)
@@ -108,8 +110,7 @@ translator, the balloon daemon, the block driver and its Mach-device client
 against the Guix Hurd libraries. MIG generates the block-device server stubs.")
     (license license:gpl3+)))
 
-;; The 9P2000.L client translator that mounts a virtio-9p share. The
-;; commit is the one toolchain/pins.mk builds.
+;; The 9P2000.L client translator that mounts a virtio-9p share.
 (define %9pfs-commit "b5b23deb1df6eb383fd2c0f5271c068861b745a8")
 
 (define-public hurd-9pfs
@@ -135,8 +136,7 @@ against the Guix Hurd libraries. MIG generates the block-device server stubs.")
                                (if (%current-target-system) "-mig" "mig"))
               ;; GNU ld does not resolve 9pfs's references through a
               ;; dependency of libc ("DSO missing from command line"), so
-              ;; libhurduser and libmachuser are named, as in
-              ;; toolchain/Makefile.
+              ;; libhurduser and libmachuser are named.
               "LIBS=shouldbeinlibc ihash ports iohelp fshelp pager hurduser machuser")
       #:phases
       #~(modify-phases %standard-phases
@@ -156,9 +156,38 @@ against the Guix Hurd libraries. MIG generates the block-device server stubs.")
 by a 9P2000.L server, such as QEMU's virtio-9p device.")
     (license license:gpl3+)))
 
-;; Upstream's virtio harness (scripts/virtio_*_test.py) was written for the
-;; Debian guest: it starts daemons with setsid and ends with poweroff. The
-;; Guix guest has neither command, so the driver-test guest gets these two.
+;; The driver test matrices of the hurdkit repository as of this commit.
+;; scripts/guix_virtio_test.sh runs this snapshot against the
+;; drivers pinned above. To move to newer matrices, change the commit and
+;; the hash here, then adapt guix_virtio_test.sh to what they expect.
+(define %matrices-commit "7742f4893298ac218539853a44807a47d6a726b4")
+
+(define-public hurdkit-virtio-matrices
+  (package
+    (name "hurdkit-virtio-matrices")
+    (version (git-version "0" "1" %matrices-commit))
+    (source
+     (origin
+       (method git-fetch)
+       (uri (git-reference
+             (url "https://github.com/hurdkit/hurdkit.git")
+             (commit %matrices-commit)))
+       (file-name (git-file-name name version))
+       (sha256
+        (base32 "16i8mmdnsqz5qns14zwhff61h50cn3dvap224czqd1l3fbp5qhyh"))))
+    (build-system copy-build-system)
+    (arguments
+     (list #:install-plan
+           #~'(("scripts" "share/hurdkit-virtio-matrices"
+                #:include-regexp ("/virtio_[a-z_]*\\.py$")))))
+    (home-page "https://github.com/hurdkit/hurdkit")
+    (synopsis "Hurdkit's virtio driver test matrices at a pinned commit")
+    (description "The Python test matrices of Hurdkit's virtio drivers and
+the module they share, for a host that runs them against a guest over SSH.")
+    (license license:gpl3+)))
+
+;; The matrices start daemons with setsid and end with poweroff. The Guix
+;; guest has neither command, so the driver-test guest gets these two.
 (define-public hurdkit-guest-compat
   (package
     (name "hurdkit-guest-compat")

@@ -22,8 +22,8 @@
 # The base image is never booted: the guest always runs from a
 # copy-on-write overlay, so the base image stays as Guix built it.
 #
-# Every setting below can be overridden from the environment; the Makefile
-# passes its own values.
+# Every setting below can be overridden from the environment; guix.mk
+# passes some of them.
 
 set -euo pipefail
 
@@ -196,9 +196,8 @@ new_overlay() {
     "$QEMU_IMG" create -q -f qcow2 -b "$(readlink -f "$BASE_IMG")" -F qcow2 "$overlay"
 }
 
-# The SSH keys of the accounts are the Debian guest's (img/keys, made by its
-# provisioning). When the Guix guest is built first, make them here, in the
-# same way; the provisioning then uses them as they are.
+# The SSH keys of the accounts live in img/keys, which the Debian guest
+# shares. Whichever side runs first creates them; existing keys are kept.
 ensure_keys() {
     local account key
     mkdir -p "$SSH_KEY_DIR"
@@ -320,7 +319,7 @@ cmd_start() {
             # The guest was stopped without a shutdown; the root filesystem
             # (ext2, no journal) is checked before the next boot.
             echo "guix_vm: checking the kept state after the forced stop" >&2
-            bash "$SCRIPT_DIR/repair_filesystem.sh" "$STATE_IMG" "$ROOT_PARTITION" >/dev/null \
+            repair_state >/dev/null \
                 || die "the repair of $STATE_IMG failed; run make guix-repair to see why"
         fi
     done
@@ -468,8 +467,8 @@ cmd_monitor() {
     (( $# >= 1 )) || die "usage: guix_vm.sh monitor COMMAND"
     [[ -n "$(qemu_pid)" ]] || die "the guest is not running"
     [[ -S "$MONITOR_SOCKET" ]] || die "no monitor socket: $MONITOR_SOCKET"
-    # The optional diagnostic monitor shares the upstream harness's Python
-    # dependency. Ordinary build/boot/SSH/stop operations do not use it.
+    # Only this diagnostic command needs Python; building, booting, SSH
+    # and stopping do not.
     need python3
     python3 -I - "$MONITOR_SOCKET" "$*" <<'PY'
 import socket, sys
@@ -494,10 +493,42 @@ s.close()
 PY
 }
 
+# Check and repair the root filesystem (ext2, no journal) of the kept
+# state. qemu-nbd serves the qcow2 file, nbdfuse shows that server as a raw
+# disk file, and e2fsck opens the root partition in it by its byte offset.
+repair_state() {
+    local tool dir disk nbd_pid fuse_pid="" start rc=1
+    for tool in qemu-nbd nbdfuse partx e2fsck; do need "$tool"; done
+    dir="$(mktemp -d)"
+    disk="$dir/disk"
+    qemu-nbd -k "$dir/nbd.sock" -f qcow2 "$STATE_IMG" &
+    nbd_pid=$!
+    if timeout 10 bash -c 'until [[ -S "$1" ]]; do sleep 0.2; done' _ "$dir/nbd.sock"; then
+        nbdfuse "$disk" --unix "$dir/nbd.sock" 2> "$dir/nbdfuse.log" &
+        fuse_pid=$!
+        if timeout 10 bash -c 'until [[ -f "$1" ]]; do sleep 0.2; done' _ "$disk" &&
+            start="$(partx -g -n "$ROOT_PARTITION" -o START "$disk")" &&
+            [[ -n "$start" ]]; then
+            # e2fsck exits with 1 or 2 when it corrected errors.
+            rc=0
+            e2fsck -fy "$disk?offset=$(( start * 512 ))" || rc=$?
+            (( rc & ~3 )) || rc=0
+            sync
+        else
+            cat "$dir/nbdfuse.log" >&2
+        fi
+    fi
+    # Without nbdfuse the file is gone, and qemu-nbd closes the image.
+    [[ -z "$fuse_pid" ]] || { kill "$fuse_pid"; wait "$fuse_pid"; } 2>/dev/null || true
+    { kill "$nbd_pid"; wait "$nbd_pid"; } 2>/dev/null || true
+    rm -rf "$dir"
+    return "$rc"
+}
+
 cmd_repair() {
     [[ -z "$(qemu_pid)" ]] || die "the guest is running; stop it first (make guix-stop)"
     [[ -f "$STATE_IMG" ]] || die "there is no kept state to repair ($STATE_IMG)"
-    bash "$SCRIPT_DIR/repair_filesystem.sh" "$STATE_IMG" "$ROOT_PARTITION"
+    repair_state || die "the repair of $STATE_IMG failed"
 }
 
 cmd_reset_state() {

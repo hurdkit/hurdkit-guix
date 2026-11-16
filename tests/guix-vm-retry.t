@@ -78,33 +78,35 @@ PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" \
     -device virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare > "$TEST_DIR/output" 2>&1
 rc=$?
 
-echo '1..15'
+number=0
+ok() { number=$((number + 1)); echo "ok $number - $*"; }
+not_ok() { number=$((number + 1)); echo "not ok $number - $*"; }
 failures=0
 if (( rc != 0 )); then
-    echo 'ok 1 - all synthetic boot attempts time out'
+    ok 'all synthetic boot attempts time out'
 else
-    echo 'not ok 1 - synthetic SSH failure unexpectedly succeeded'
+    not_ok 'synthetic SSH failure unexpectedly succeeded'
     failures=1
 fi
 if [[ "$(wc -l < "$TEST_DIR/boots")" == 2 ]]; then
-    echo 'ok 2 - exactly two boot attempts run'
+    ok 'exactly two boot attempts run'
 else
-    echo 'not ok 2 - expected two boot attempts'
+    not_ok 'expected two boot attempts'
     cat "$TEST_DIR/boots"
     failures=1
 fi
 if awk '{ actual=substr($2, 8); created=substr($3, 9); if (actual != created) exit 1 }' "$TEST_DIR/boots"; then
-    echo 'ok 3 - each boot starts from its newly created overlay'
+    ok 'each boot starts from its newly created overlay'
 else
-    echo 'not ok 3 - a boot reused writes from the previous attempt'
+    not_ok 'a boot reused writes from the previous attempt'
     sed 's/^/# /' "$TEST_DIR/boots"
     failures=1
 fi
 if grep -q 'checking the kept state' "$TEST_DIR/output"; then
-    echo 'not ok 4 - disposable retry incorrectly repairs persistent state'
+    not_ok 'disposable retry incorrectly repairs persistent state'
     failures=1
 else
-    echo 'ok 4 - disposable retry does not run persistent repair'
+    ok 'disposable retry does not run persistent repair'
 fi
 # A separately sourced command-construction test: arrays cannot be exported
 # into another Bash process as an ordinary environment variable.
@@ -120,25 +122,25 @@ PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" QEMU_SYSTEM="$TEST_DIR/bin/
     _ "$REPO_ROOT" > "$args_dir/args"
 if [[ "$(sed -n '/^-fsdev$/{n;p;}' "$args_dir/args")" == 'local,id=hostshare,path=/tmp/a path,security_model=none' ]] &&
    [[ "$(sed -n '/^-device$/{n;p;}' "$args_dir/args" | tail -n 1)" == 'virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare' ]]; then
-    echo 'ok 5 - complete virtio arguments survive the guest-start boundary'
+    ok 'complete virtio arguments survive the guest-start boundary'
 else
-    echo 'not ok 5 - virtio arguments were split or lost'
+    not_ok 'virtio arguments were split or lost'
     sed 's/^/# /' "$args_dir/args"
     failures=1
 fi
 if [[ "$(sed -n '/^-hda$/{n;p;}' "$args_dir/args")" == test.qcow2 ]] &&
    [[ "$(sed -n '/^-display$/{n;p;}' "$args_dir/args")" == none ]]; then
-    echo 'ok 6 - disk and caller options survive argument forwarding'
+    ok 'disk and caller options survive argument forwarding'
 else
-    echo 'not ok 6 - disk or caller options were lost'
+    not_ok 'disk or caller options were lost'
     sed 's/^/# /' "$args_dir/args"
     failures=1
 fi
 if [[ "$(sed -n '/^-fsdev$/{n;p;}' "$TEST_DIR/qemu-1.argv")" == 'local,id=hostshare,path=/tmp/a path,security_model=none' ]] &&
    [[ "$(sed -n '/^-device$/{n;p;}' "$TEST_DIR/qemu-1.argv" | tail -n 1)" == 'virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare' ]]; then
-    echo 'ok 7 - the start entry point preserves complete virtio arguments'
+    ok 'the start entry point preserves complete virtio arguments'
 else
-    echo 'not ok 7 - the start entry point dropped or split virtio arguments'
+    not_ok 'the start entry point dropped or split virtio arguments'
     sed 's/^/# /' "$TEST_DIR/qemu-1.argv"
     failures=1
 fi
@@ -155,9 +157,9 @@ stop_rc=$?
 set -e
 kill "$stop_pid" 2>/dev/null || true
 if (( stop_rc != 0 )) && grep -q 'did not shut down' "$stop_dir/output"; then
-    echo 'ok 8 - a forced stop without the shutdown marker fails'
+    ok 'a forced stop without the shutdown marker fails'
 else
-    echo 'not ok 8 - missing shutdown marker was reported as success'
+    not_ok 'missing shutdown marker was reported as success'
     sed 's/^/# /' "$stop_dir/output"
     failures=1
 fi
@@ -180,9 +182,9 @@ set -e
 if (( persist_rc != 0 )) &&
    grep -F -x -A1 -- '-smp' "$TEST_DIR/persist.argv" | tail -n 1 | grep -Fxq 4 &&
    grep -F -x -A1 -- '-device' "$TEST_DIR/persist.argv" | grep -Fxq 'virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare'; then
-    echo 'ok 9 - persistent mode forwards QEMU options'
+    ok 'persistent mode forwards QEMU options'
 else
-    echo 'not ok 9 - persistent mode dropped its QEMU options'
+    not_ok 'persistent mode dropped its QEMU options'
     sed 's/^/# /' "$TEST_DIR/persist-output"
     failures=1
 fi
@@ -202,9 +204,9 @@ PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" SSH_KEY_DIR="$TEST_DIR/keys
     bash "$REPO_ROOT/scripts/guix_vm.sh" stop > "$TEST_DIR/halt-output" 2>&1 || true
 if grep -Fq 'timeout --signal=TERM --kill-after=2s 15s' scripts/guix_vm.sh &&
    grep -Fxq halt "$TEST_DIR/halt-ssh.argv"; then
-    echo 'ok 10 - the halt SSH command has a finite timeout'
+    ok 'the halt SSH command has a finite timeout'
 else
-    echo 'not ok 10 - halt SSH command lacks a finite timeout'
+    not_ok 'halt SSH command lacks a finite timeout'
     sed 's/^/# /' "$TEST_DIR/halt-output" 2>/dev/null
     sed 's/^/# /' "$TEST_DIR/halt-ssh.argv" 2>/dev/null
     failures=1
@@ -227,9 +229,9 @@ PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" SSH_KEY_DIR="$TEST_DIR/keys
 active_stop_rc=$?
 if (( active_stop_rc == 0 )) && grep -q 'guest has shut down' "$TEST_DIR/active-stop-output" &&
    grep -q 'Shutdown completed successfully' "$TEST_DIR/guix/serial.log"; then
-    echo 'ok 11 - stop reads the active serial log and preserves its marker'
+    ok 'stop reads the active serial log and preserves its marker'
 else
-    echo 'not ok 11 - stop missed the active serial log'
+    not_ok 'stop missed the active serial log'
     sed 's/^/# /' "$TEST_DIR/active-stop-output"
     failures=1
 fi
@@ -244,9 +246,9 @@ PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" SSH_KEY_DIR="$TEST_DIR/keys
 stale_pointer_rc=$?
 if (( stale_pointer_rc == 0 )) &&
    grep -q 'Shutdown completed successfully' "$TEST_DIR/guix/serial.log"; then
-    echo 'ok 12 - a stale serial pointer falls back to the preserved log'
+    ok 'a stale serial pointer falls back to the preserved log'
 else
-    echo 'not ok 12 - a stale serial pointer hid the preserved log'
+    not_ok 'a stale serial pointer hid the preserved log'
     sed 's/^/# /' "$TEST_DIR/stale-pointer-output"
     failures=1
 fi
@@ -268,9 +270,9 @@ PATH="$TEST_DIR/bin:$PATH" GUIX="$TEST_DIR/other-bin/guix" \
 other_guix_rc=$?
 if (( other_guix_rc != 0 )) && grep -q 'is not goonix' "$TEST_DIR/other-guix-output" &&
    ! grep -q '^system' "$TEST_DIR/other-guix.calls"; then
-    echo 'ok 13 - image refuses a Guix other than goonix'
+    ok 'image refuses a Guix other than goonix'
 else
-    echo 'not ok 13 - image used a Guix other than goonix'
+    not_ok 'image used a Guix other than goonix'
     sed 's/^/# /' "$TEST_DIR/other-guix-output"
     failures=1
 fi
@@ -293,14 +295,14 @@ PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" SSH_KEY_DIR="$TEST_DIR/keys
 hung_rc=$?
 hung_time=$(( SECONDS - hung_start ))
 if (( hung_rc == 0 && hung_time < 10 )); then
-    echo "ok 14 - a hung halt connection does not delay stop (${hung_time} s)"
+    ok "a hung halt connection does not delay stop (${hung_time} s)"
 else
-    echo "not ok 14 - stop took ${hung_time} s with a hung halt connection (rc $hung_rc)"
+    not_ok "stop took ${hung_time} s with a hung halt connection (rc $hung_rc)"
     sed 's/^/# /' "$TEST_DIR/hung-halt-output"
     failures=1
 fi
-# The accounts' SSH keys are created when missing, as the Debian
-# provisioning creates them, before Guix reads their public halves.
+# The accounts' SSH keys are created when missing, before Guix reads
+# their public halves.
 mkdir -p "$TEST_DIR/newkeys-os"
 : > "$TEST_DIR/newkeys-os/os.scm"
 printf '#!/usr/bin/env bash\n[[ "${1:-}" == --version ]] && echo "guix (GNU Guix) 1.5.0-goonix.test"\nexit 0\n' > "$TEST_DIR/bin/guix"
@@ -313,10 +315,11 @@ set -e
 if [[ -f "$TEST_DIR/newkeys/root_ed25519" && -f "$TEST_DIR/newkeys/peon_ed25519.pub" ]] &&
    [[ "$(ssh-keygen -y -f "$TEST_DIR/newkeys/peon_ed25519" | cut -d' ' -f1,2)" == "$(cut -d' ' -f1,2 "$TEST_DIR/newkeys/peon_ed25519.pub")" ]] &&
    [[ "$(stat -c %a "$TEST_DIR/newkeys/root_ed25519")" == 600 ]]; then
-    echo 'ok 15 - image creates missing account SSH keys'
+    ok 'image creates missing account SSH keys'
 else
-    echo 'not ok 15 - image did not create the account SSH keys'
+    not_ok 'image did not create the account SSH keys'
     sed 's/^/# /' "$TEST_DIR/newkeys-output"
     failures=1
 fi
+echo "1..$number"
 exit "$failures"

@@ -1,0 +1,68 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: 7778777 <7778777@7778777.online>
+Date: Mon, 16 Nov 2026 22:19:40 +0100
+Subject: [PATCH 2/2] vm: make vm_object_sync a no-op for the default pager's
+ objects
+
+msync on anonymous shared memory or on a file of a tmpfs returns the
+pages to the default memory manager.  With paging space they are written
+to it for nothing: the pages are the data itself, there is no file to
+bring up to date.  Without paging space the manager cannot store them
+and drops them ("data_return write error, losing data"), and every later
+page-in of the object fails; with MS_INVALIDATE the kernel has flushed
+its own copy by then, so the data is gone.
+
+* vm/vm_user.c (vm_object_sync): Return KERN_SUCCESS for internal
+objects and for objects whose pager is the default memory manager.
+Include vm/memory_object.h and ipc/ipc_port.h.
+---
+ vm/vm_user.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
+
+diff --git a/vm/vm_user.c b/vm/vm_user.c
+index 94cfb891..47912b30 100644
+--- a/vm/vm_user.c
++++ b/vm/vm_user.c
+@@ -45,10 +45,12 @@
+ #include <kern/mach.server.h>
+ #include <kern/mach_host.server.h>
+ #include <kern/task.h>
++#include <ipc/ipc_port.h>
+ #include <vm/vm_fault.h>
+ #include <vm/vm_kern.h>
+ #include <vm/vm_map.h>
+ #include <vm/vm_object.h>
++#include <vm/memory_object.h>
+ #include <vm/memory_object_proxy.h>
+ #include <vm/vm_page.h>
+ 
+@@ -518,9 +520,26 @@ kern_return_t vm_object_sync(
+ 	boolean_t		should_return,
+ 	boolean_t		should_iosync)
+ {
++	boolean_t default_backed;
++
+ 	if (object == VM_OBJECT_NULL)
+ 		return KERN_INVALID_ARGUMENT;
+ 
++	/*
++	 *	The pages of an object that the default memory manager backs
++	 *	(anonymous memory, the files of a tmpfs) are the data itself:
++	 *	there is no file to bring up to date.  Returning them would
++	 *	only move them to the paging space, or lose them when there
++	 *	is none, and flushing them would discard them.
++	 */
++	vm_object_lock(object);
++	default_backed = object->internal ||
++		(object->pager != IP_NULL &&
++		 memory_manager_default_port(object->pager));
++	vm_object_unlock(object);
++	if (default_backed)
++		return KERN_SUCCESS;
++
+ 	/* FIXME: we should rather introduce an internal function, e.g.
+ 	   vm_object_update, rather than calling memory_object_lock_request.  */
+ 	vm_object_reference(object);
+-- 
+2.56.0
+

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # The niri plan's stage-1 gate: build guix/hurd64-platform.scm, boot it in
-# its own directory and port, and run the platform tests in it. Every test
-# but the Rust hello prints TAP; a "not ok", a missing plan, a nonzero exit
-# or a test that runs longer than STAGE1_TEST_TIMEOUT seconds fails. Skips
-# (documented platform differences) are listed, not failed.
+# its own directory and port, and run the platform tests in it. A TAP test
+# fails on a "not ok", a missing plan, a nonzero exit, or when it runs
+# longer than STAGE1_TEST_TIMEOUT seconds. Skips (documented platform
+# differences) are listed, not failed.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export GUIX_DIR="${GUIX_DIR:-$ROOT/img/guix-platform}"
@@ -48,6 +48,7 @@ run_tap tmpfs-shm /tmp 20
 for name in eventfd epoll timerfd signalfd; do
     run_tap "hurd-epoll-shim-test-$name"
 done
+# The hello program prints one line, not TAP.
 if [[ "$(guix_vm ssh root hurdkit-rust-hello)" != "hurdkit rust hello" ]]; then
     echo "FAIL: hurdkit-rust-hello"
     status=1

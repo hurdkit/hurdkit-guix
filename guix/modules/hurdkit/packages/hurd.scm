@@ -1,4 +1,4 @@
-;;; GNU Mach and Hurd at the commits Hurdkit's toolchain builds.
+;;; Hurdkit's GNU Mach and a newer Hurd, at pinned commits.
 (define-module (hurdkit packages hurd)
   #:use-module (gnu packages)
   #:use-module (gnu packages hurd)
@@ -7,9 +7,8 @@
   #:use-module (guix utils)
   #:use-module (hurdkit utils))
 
-;; Guix needs fixed commits and hashes. toolchain/pins.mk follows the
-;; hurdkit branch of the GNU Mach fork instead; move these pins forward
-;; together with it.
+;; Guix needs fixed commits and hashes: these two are pins of this module
+;; alone, moved forward by hand (commit and base32 hash together).
 (define %gnumach-hurdkit-commit "a6c332067ea3628839f1c5bee5fbf42bb0742008")
 (define %hurd-hurdkit-commit "9b556c6ad91197125bff8261462f51b024ad8e00")
 
@@ -56,7 +55,7 @@
        ;; With make -j, utils/ of this source intermittently fails: "No
        ;; rule to make target 'auth_requestUser.stamp'".
        ((#:parallel-build? _ #t) #f)))
-    (synopsis "The Hurd at the commit Hurdkit's toolchain builds")))
+    (synopsis "The Hurd at a newer, pinned commit")))
 
 ;; tmpfs keeps the mappings of an unlinked file working after its last
 ;; close, as shared memory (shm_open, Wayland buffers) needs.
@@ -71,3 +70,32 @@
         (append (origin-patches (package-source hurd-hurdkit))
                 (list (hurdkit-patch "hurd-tmpfs-keep-mapped.patch"))))))
     (synopsis "The Hurd with mappings of unlinked tmpfs files kept")))
+
+;; Shared memory on a tmpfs also needs the default pager and GNU Mach to
+;; keep its pages: when a file is truncated in the middle of a page, and
+;; on msync.
+(define-public hurd-shm
+  (package
+    (inherit hurd-tmpfs-mapped)
+    (name "hurd-shm")
+    (source
+     (origin
+       (inherit (package-source hurd-tmpfs-mapped))
+       (patches
+        (append (origin-patches (package-source hurd-tmpfs-mapped))
+                (list (hurdkit-patch "hurd-defpager-truncate-copy.patch"))))))
+    (synopsis "The Hurd with the fixes for shared memory on a tmpfs")))
+
+(define-public gnumach-shm
+  (package
+    (inherit gnumach-hurdkit)
+    (name "gnumach-shm")
+    (source
+     (origin
+       (inherit (package-source gnumach-hurdkit))
+       (patches
+        (append (origin-patches (package-source gnumach-hurdkit))
+                (map hurdkit-patch
+                     '("gnumach-copyin-laundry-pages.patch"
+                       "gnumach-object-sync-default-pager.patch"))))))
+    (synopsis "GNU Mach with the fixes for the default pager's objects")))

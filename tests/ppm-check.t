@@ -11,7 +11,6 @@ printf 'P6\n# generated fixture\n3 2\n255\n' > "$TEST_DIR/solid.ppm"
 printf '\377\000\000\377\000\000\000\377\000\377\000\000\000\000\377\377\000\000' >> "$TEST_DIR/solid.ppm"
 cp "$TEST_DIR/solid.ppm" "$TEST_DIR/changed.ppm"
 printf '\377\377\377' | dd of="$TEST_DIR/changed.ppm" bs=1 seek=31 conv=notrunc status=none
-echo '1..10'
 failures=0
 number=0
 check() {
@@ -35,4 +34,5 @@ check 'a one-pixel change passes a 10 percent minimum' "${PPM[@]}" changed "$TES
 check_fails 'an unchanged image fails any minimum' "${PPM[@]}" changed "$TEST_DIR/solid.ppm" "$TEST_DIR/solid.ppm" 0.01
 check_fails 'a truncated image is rejected' bash -c "head -c 30 '$TEST_DIR/solid.ppm' > '$TEST_DIR/truncated.ppm'; tclsh '${PPM[1]}' dimensions '$TEST_DIR/truncated.ppm'"
 check_fails 'an invalid region is rejected' "${PPM[@]}" region "$TEST_DIR/solid.ppm" 0 0 4 2 ff0000 0
+echo "1..$number"
 exit "$failures"
