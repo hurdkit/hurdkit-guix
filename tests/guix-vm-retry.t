@@ -112,7 +112,7 @@ printf '%s\n' -- "$@"
 SH
 chmod +x "$TEST_DIR/bin/record-qemu"
 PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" QEMU_SYSTEM="$TEST_DIR/bin/record-qemu" \
-    bash -c 'repo="$1"; source <(sed "/^command=/,\$d" "$repo/scripts/guix_vm.sh"); GUIX_VM_EXTRA_ARGS=(-fsdev local,id=hostshare,path="/tmp/a path",security_model=none -device virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare); qemu_command test.qcow2 -display none' \
+    bash -c 'repo="$1"; GUIX_SCRIPT_DIR="$repo/scripts" GUIX_REPO_ROOT="$repo" source <(sed "/^command=/,\$d" "$repo/scripts/guix_vm.sh"); GUIX_VM_EXTRA_ARGS=(-fsdev local,id=hostshare,path="/tmp/a path",security_model=none -device virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare); qemu_command test.qcow2 -display none' \
     _ "$REPO_ROOT" > "$args_dir/args"
 if [[ "$(sed -n '/^-fsdev$/{n;p;}' "$args_dir/args")" == 'local,id=hostshare,path=/tmp/a path,security_model=none' ]] &&
    [[ "$(sed -n '/^-device$/{n;p;}' "$args_dir/args" | tail -n 1)" == 'virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare' ]]; then
@@ -146,7 +146,7 @@ stop_pid=$!
 printf '%s\n' "$stop_pid" > "$TEST_DIR/guix/qemu.pid"
 set +e
 GUIX_DIR="$TEST_DIR/guix" SSH_KEY_DIR="$TEST_DIR/keys" \
-    bash -c 'repo="$1"; source <(sed "/^command=/,\$d" "$repo/scripts/guix_vm.sh"); SERIAL_LOG="$2/no-marker.log"; : > "$SERIAL_LOG"; guest_ssh() { return 0; }; cmd_stop' _ "$REPO_ROOT" "$stop_dir" > "$stop_dir/output" 2>&1
+    bash -c 'repo="$1"; GUIX_SCRIPT_DIR="$repo/scripts" GUIX_REPO_ROOT="$repo" source <(sed "/^command=/,\$d" "$repo/scripts/guix_vm.sh"); SERIAL_LOG="$2/no-marker.log"; : > "$SERIAL_LOG"; guest_ssh() { return 0; }; cmd_stop' _ "$REPO_ROOT" "$stop_dir" > "$stop_dir/output" 2>&1
 stop_rc=$?
 set -e
 kill "$stop_pid" 2>/dev/null || true
@@ -166,7 +166,7 @@ exit 1
 SH
 rm -f "$TEST_DIR/guix/qemu.pid"
 set +e
-PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" \
+PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" GUIX_SCRIPT_DIR="$REPO_ROOT/scripts" GUIX_REPO_ROOT="$REPO_ROOT" \
     SSH_KEY_DIR="$TEST_DIR/keys" GUIX_BOOT_TIMEOUT=1 GUIX_BOOT_ATTEMPTS=1 \
     bash "$REPO_ROOT/scripts/guix_vm.sh" start persist -- \
     -smp 4 -device virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare \
@@ -174,7 +174,8 @@ PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" \
 persist_rc=$?
 set -e
 if (( persist_rc != 0 )) &&
-   [[ "$(sed -n '/^-smp$/{n;p;}' "$TEST_DIR/persist.argv")" == 4 ]]; then
+   grep -F -x -A1 -- '-smp' "$TEST_DIR/persist.argv" | tail -n 1 | grep -Fxq 4 &&
+   grep -F -x -A1 -- '-device' "$TEST_DIR/persist.argv" | grep -Fxq 'virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare'; then
     echo 'ok 9 - persistent mode forwards QEMU options'
 else
     echo 'not ok 9 - persistent mode dropped its QEMU options'

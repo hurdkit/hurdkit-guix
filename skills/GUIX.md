@@ -101,6 +101,36 @@ For a guest that does not answer, inspect `img/guix/serial-N.log` and use
 stop. Every timed-out disposable boot gets a fresh overlay. Persistent retries
 retain their state and repair it before the next attempt.
 
+### Graphics reference and stage 0
+
+Use the pinned `nix develop ./nix#guix` shell. `make linux-ref-image` builds
+`guix/linux-reference.scm`; `make linux-ref-start` boots it on host SSH port
+2224. `GUIX_GPU=none|2d|virgl|venus|nctx`, `GUIX_DISPLAY=none|egl-headless|gtk`,
+and `GPU=amd|nvidia` select the graphics configuration. For example:
+
+```sh
+make linux-ref-start GUIX_GPU=virgl GUIX_DISPLAY=egl-headless GPU=amd
+make linux-ref-screenshot
+make linux-ref-qmp QMP_ARGS='key super+t'
+make linux-ref-stop
+```
+
+`linux-ref-screenshot` uses niri IPC and converts its PNG to PPM. QMP
+`screendump` cannot read QEMU's accelerated GL texture/dmabuf scanout; it is
+still used for the Hurd VGA console. `scripts/qmp.tcl` supports QMP status,
+input, screendump, trace controls and raw JSON. `scripts/ppm_check.tcl`
+checks PPM dimensions, colour regions and differences.
+
+For Venus, the harness derives the selected host GPU's PCI IDs from sysfs and
+uses `VK_DRIVER_FILES` to expose its host ICD. `GPU_VK_DEVICE` and
+`GPU_VK_ICD_FILE` override discovery when needed. Basic Venus does not need
+`GUIX_VENUS_MEMFD=1`. `GUIX_TRACE='virtio_gpu_cmd_*'` records command traces;
+`GUIX_TRACE_FILE` selects their path. Extra QEMU options are passed with
+`GUIX_QEMU_ARGS`. Run `make stage0-harness-check` for synthetic tests and
+`make stage0-check` for the live Hurd and Linux virgl/Venus gate. The current
+reference Mesa does not enable the native AMD context; see the stage-0
+Findings before treating `GUIX_GPU=nctx` as supported.
+
 ### Host archive signing
 
 The guest declaration carries the public host signing key. The private key
