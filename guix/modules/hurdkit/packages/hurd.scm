@@ -53,10 +53,11 @@
              (commit %hurdkit-hurd-commit)))
        (file-name (git-file-name "hurd-tmpfs-mapped" version))
        (sha256
-        (base32 "041lh07f6zarqpcvvd297khqnr3gjjcjmiy1ddqc5qgg15xv4p3r"))
+        (base32 "0ga2pyq2llrmfwqh3s5lq0rl8m0zbs8j0l701f9mrfb3h4xqp7r4"))
        ;; The receive-control-block fix is present in the newer source.
        (patches
-        (append (search-patches "hurd-refcounts-assert.patch"
-                                "hurd-rumpdisk-no-hd.patch")
-                (list (hurdkit-patch "tmpfs-mapped-lifetime.patch"))))))
+        (append (search-patches "hurd-refcounts-assert.patch")
+                (list (hurdkit-patch "hurd-upstream-rumpdisk-compat.patch")
+                      (hurdkit-patch "hurd-upstream-bpf-opcodes.patch")
+                      (hurdkit-patch "tmpfs-mapped-lifetime.patch"))))))
     (synopsis "Newer Hurd with tmpfs mapped-object lifetime fix")))

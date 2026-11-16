@@ -140,6 +140,18 @@ guest on both success and failure. The patched Hurd, shim, test programs,
 and crate patches live in this checkout; no goonix or glibc edit is needed.
 The ordinary `guix/hurd64.scm` derivation is unchanged.
 
+`hurd-tmpfs-mapped` pins Hurd commit
+`9b556c6ad91197125bff8261462f51b024ad8e00` and carries the mapped-lifetime
+patch. `gnumach-hurdkit` pins Mach commit
+`a6c332067ea3628839f1c5bee5fbf42bb0742008` from Hurdkit's fork, including
+its shared-IRQ fixes. These match `toolchain/pins.mk`; change both package
+pins and the shared toolchain pins together. The Guix OS selects the Mach
+kernel explicitly. The Hurd cross-build retains goonix's header inputs and
+uses local compatibility patches for the older rumpkernel and BPF opcodes;
+this does not replace the global cross-toolchain. Patch and test sources
+use canonical absolute paths rather than copying a build-artifact-laden
+checkout into the store.
+
 ### Hurdkit Guile modules
 
 Image and driver builds use `-L guix/modules`. Add package modules below

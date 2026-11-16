@@ -1,38 +1,34 @@
 diff --git a/libpager/pager-flush.c b/libpager/pager-flush.c
-index bd7697ca..5c6d549c 100644
+index bd7697ca..a90a9831 100644
 --- a/libpager/pager-flush.c
 +++ b/libpager/pager-flush.c
-@@ -42,3 +42,32 @@ pager_flush_some (struct pager *p, vm_address_t offset,
+@@ -42,3 +42,28 @@ pager_flush_some (struct pager *p, vm_address_t offset,
    _pager_lock_object (p, offset, size, MEMORY_OBJECT_RETURN_NONE, 1,
  		      VM_PROT_NO_CHANGE, wait);
  }
 +
-+
-+/* Restrict access to a range before flushing it.  Unlike pager_flush_some,
-+   this forces later accesses through the pager's extent and error checks. */
++/* Invalidate pages in a truncated range and remove their old contents.
++   Restoring the former protection asks the pager on the next access. */
 +void
 +pager_invalidate_some (struct pager *p, vm_address_t offset,
-+		       vm_size_t size, int wait)
++                       vm_size_t size, int wait)
 +{
 +  _pager_lock_object (p, offset, size, MEMORY_OBJECT_RETURN_NONE, 1,
-+		      VM_PROT_ALL, wait);
++                      VM_PROT_NONE, wait);
++  _pager_lock_object (p, offset, size, MEMORY_OBJECT_RETURN_NONE, 1,
++                      VM_PROT_ALL, wait);
 +}
 +
-+/* An EOF fault is not permanent after the file grows. */
 +void
-+pager_clear_errors (struct pager *p, vm_address_t offset, vm_size_t length)
++pager_clear_errors (struct pager *p, vm_address_t offset, vm_size_t size)
 +{
-+  vm_size_t first = offset / __vm_page_size;
-+  vm_size_t last = (offset + length + __vm_page_size - 1) / __vm_page_size;
 +  pthread_mutex_lock (&p->interlock);
-+  if (last > p->pagemapsize)
-+    last = p->pagemapsize;
-+  if (p->pagemap)
-+    {
-+      vm_size_t index;
-+      for (index = first; index < last; ++index)
-+        p->pagemap[index] &= ~(PM_INVALID | 0xc | 0x3);
-+    }
++  for (vm_address_t page = offset; page < offset + size;
++       page += vm_page_size)
++    if (page / vm_page_size < p->pagemapsize)
++      p->pagemap[page / vm_page_size] =
++        SET_PM_ERROR (SET_PM_NEXTERROR (p->pagemap[page / vm_page_size], 0), 0)
++        & ~(PM_INVALID | PM_PAGEINWAIT | PM_PAGINGOUT);
 +  pthread_mutex_unlock (&p->interlock);
 +}
 diff --git a/libpager/pager.h b/libpager/pager.h
@@ -76,10 +72,10 @@ index bcb76e9a..9f2e674e 100644
  # XXX The shared libdiskfs requires libstore even though we don't use it here.
  HURDLIBS = diskfs pager iohelp fshelp store ports ihash shouldbeinlibc
 diff --git a/tmpfs/node.c b/tmpfs/node.c
-index ff6c28eb..cdfbc574 100644
+index ff6c28eb..ed0a35ae 100644
 --- a/tmpfs/node.c
 +++ b/tmpfs/node.c
-@@ -19,6 +19,7 @@
+@@ -19,16 +19,31 @@
  
  #include "tmpfs.h"
  #include <stddef.h>
@@ -87,7 +83,11 @@ index ff6c28eb..cdfbc574 100644
  #include <stdlib.h>
  #include <fcntl.h>
  #include <mach/mach4.h>
-@@ -29,6 +30,19 @@
+ #include <hurd/hurd_types.h>
++#include <hurd/sigpreempt.h>
+ #include <hurd/store.h>
+ #include "default_pager_U.h"
+ #include "libdiskfs/fs_S.h"
  
  unsigned int num_files;
  static unsigned int gen;
@@ -107,7 +107,7 @@ index ff6c28eb..cdfbc574 100644
  
  /* all_nodes is a list of all nodes.
  
-@@ -73,12 +87,16 @@ diskfs_free_node (struct node *np, mode_t mode)
+@@ -73,12 +88,16 @@ diskfs_free_node (struct node *np, mode_t mode)
    switch (np->dn->type)
      {
      case DT_REG:
@@ -130,11 +130,67 @@ index ff6c28eb..cdfbc574 100644
        break;
      case DT_DIR:
        assert_backtrace (np->dn->u.dir.entries == 0);
-@@ -454,22 +472,21 @@ diskfs_truncate (struct node *np, off_t size)
+@@ -427,6 +446,41 @@ diskfs_node_reload (struct node *node)
+ }
+ 
  
-   np->dn_stat.st_size = size;
++/* Zero the part of the last page that truncation discards. Do this before
++   shrinking the pager's valid extent: mapping a whole page after EOF would
++   fault on its inaccessible suffix. A separate send right avoids consuming
++   the pager's receive right or retaining a mapping after this returns. */
++static error_t
++zero_partial_tail (struct node *np, off_t eof)
++{
++  memory_object_t object;
++  vm_address_t address = 0;
++  vm_size_t length = round_page (eof) - eof;
++  error_t err;
++
++  if (length == 0 || eof == 0)
++    return 0;
++
++  object = ports_get_send_right (np->dn->u.reg.pager);
++  if (!MACH_PORT_VALID (object))
++    return EIO;
++  err = vm_map (mach_task_self (), &address, vm_page_size, 0, 1,
++                object, trunc_page (eof), 0,
++                VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ | VM_PROT_WRITE,
++                VM_INHERIT_NONE);
++  mach_port_deallocate (mach_task_self (), object);
++  if (err)
++    return err;
++
++  err = hurd_safe_memset ((void *) (address + eof - trunc_page (eof)),
++                          0, length);
++  if (!err)
++    err = vm_deallocate (mach_task_self (), address, vm_page_size);
++  else
++    vm_deallocate (mach_task_self (), address, vm_page_size);
++  return err;
++}
++
+ /* The user must define this function.  Truncate locked node NP to be SIZE
+    bytes long.  (If NP is already less than or equal to SIZE bytes
+    long, do nothing.)  If this is a symlink (and diskfs_shortcut_symlink
+@@ -452,24 +506,36 @@ diskfs_truncate (struct node *np, off_t size)
+   if (default_pager == MACH_PORT_NULL)
+     return EIO;
+ 
+-  np->dn_stat.st_size = size;
++  if (np->dn->u.reg.pager != NULL && np->dn_stat.st_nlink != 0)
++    {
++      error_t err;
++
++      /* Zero through the old, still-valid extent. Keep the partial page
++         cached: tmpfs writeback discards data, so flushing it here would
++         also destroy the valid prefix. */
++      err = zero_partial_tail (np, size);
++      if (err)
++        return err;
++    }
  
 -  off_t set_size = size;
++  np->dn_stat.st_size = size;
    size = round_page (size);
  
 -  if (np->dn->u.reg.memobj != MACH_PORT_NULL)
@@ -154,18 +210,20 @@ index ff6c28eb..cdfbc574 100644
 +      struct user_pager_info *info = pager_get_upi (np->dn->u.reg.pager);
 +      pthread_mutex_lock (&info->lock);
 +      if (np->dn_stat.st_nlink != 0)
-+        info->size = size;
++        {
++          info->size = size;
++          info->eof = np->dn_stat.st_size;
++        }
 +      /* Final unlink cleanup must not turn the surviving anonymous
 +         mapping into a zero-length object. */
 +      pthread_mutex_unlock (&info->lock);
-+      pager_sync (np->dn->u.reg.pager, 1);
-+      if (np->dn_stat.st_nlink != 0)
++      if (np->dn_stat.st_nlink != 0 && np->allocsize > size)
 +        pager_invalidate_some (np->dn->u.reg.pager, size,
 +                               np->allocsize - size, 1);
      }
    /* Otherwise it never had any real contents.  */
  
-@@ -492,7 +509,6 @@ diskfs_grow (struct node *np, off_t size, struct protid *cred)
+@@ -492,7 +558,6 @@ diskfs_grow (struct node *np, off_t size, struct protid *cred)
    if (np->allocsize >= size)
      return 0;
  
@@ -173,7 +231,7 @@ index ff6c28eb..cdfbc574 100644
    size = round_page (size);
    if (round_page (get_used () + size - np->allocsize)
        / vm_page_size > tmpfs_page_limit)
-@@ -501,14 +517,14 @@ diskfs_grow (struct node *np, off_t size, struct protid *cred)
+@@ -501,14 +566,14 @@ diskfs_grow (struct node *np, off_t size, struct protid *cred)
    if (default_pager == MACH_PORT_NULL)
      return EIO;
  
@@ -195,7 +253,7 @@ index ff6c28eb..cdfbc574 100644
      }
  
    adjust_used (size - np->allocsize);
-@@ -544,48 +560,31 @@ diskfs_get_filemap (struct node *np, vm_prot_t prot)
+@@ -544,49 +609,35 @@ diskfs_get_filemap (struct node *np, vm_prot_t prot)
       so we might never make a memory object at all.) */
    if (np->dn->u.reg.memobj == MACH_PORT_NULL)
      {
@@ -234,37 +292,42 @@ index ff6c28eb..cdfbc574 100644
 -      if (err)
 +      struct user_pager_info *info = malloc (sizeof *info);
 +      if (info == NULL)
-+        {
+         {
+-          errno = err;
 +          errno = ENOSPC;
-+          return MACH_PORT_NULL;
-+        }
+           return MACH_PORT_NULL;
+         }
 +      pthread_mutex_init (&info->lock, NULL);
 +      info->size = np->allocsize;
++      info->eof = np->dn_stat.st_size;
 +      np->dn->u.reg.pager = pager_create (info, pager_bucket,
 +                                          np->dn_stat.st_nlink != 0,
 +                                          MEMORY_OBJECT_COPY_DELAY, 0);
 +      if (np->dn->u.reg.pager == NULL)
-         {
--          errno = err;
++        {
 +          pthread_mutex_destroy (&info->lock);
 +          free (info);
-           return MACH_PORT_NULL;
-         }
++          return MACH_PORT_NULL;
++        }
++      /* Keep the pager's receive right for internal operations. */
 +      np->dn->u.reg.memobj = pager_get_port (np->dn->u.reg.pager);
      }
  
 -  /* Add a reference for each call, the caller will deallocate it.  */
 -  err = mach_port_mod_refs (mach_task_self (), np->dn->u.reg.memobj,
 -			    MACH_PORT_RIGHT_SEND, +1);
-+  /* Use the same send right for read-only and writable callers.  The kernel
-+     enforces the protection requested by the caller when it maps it. */
-+  right = np->dn->u.reg.memobj;
-+  err = mach_port_insert_right (mach_task_self (), right, right,
-+                                MACH_MSG_TYPE_MAKE_SEND);
-   assert_perror_backtrace (err);
+-  assert_perror_backtrace (err);
++  /* Each caller consumes a distinct memory-object send right. */
++  right = ports_get_send_right (np->dn->u.reg.pager);
++  if (!MACH_PORT_VALID (right))
++    {
++      errno = EIO;
++      return MACH_PORT_NULL;
++    }
  
    return right;
-@@ -598,19 +597,92 @@ diskfs_get_filemap (struct node *np, vm_prot_t prot)
+ }
+@@ -598,19 +649,96 @@ diskfs_get_filemap (struct node *np, vm_prot_t prot)
  struct pager *
  diskfs_get_filemap_pager_struct (struct node *np)
  {
@@ -307,10 +370,11 @@ index ff6c28eb..cdfbc574 100644
 +      pthread_mutex_unlock (&upi->lock);
 +      return EIO;
 +    }
++  if (page + vm_page_size > upi->eof)
++    *write_lock = VM_PROT_WRITE;
++  else
++    *write_lock = 0;
 +  pthread_mutex_unlock (&upi->lock);
-+  *write_lock = 0;
-+  fprintf (stderr, "tmpfs page-in: offset=%lu size=%lu\n",
-+           (unsigned long) page, (unsigned long) upi->size);
 +  return vm_allocate (mach_task_self (), buf, vm_page_size, 1);
 +}
 +
@@ -320,7 +384,10 @@ index ff6c28eb..cdfbc574 100644
 +{
 +  (void) upi;
 +  (void) page;
-+  return vm_deallocate (mach_task_self (), buf, vm_page_size);
++  (void) buf;
++  /* Anonymous pages are owned by the kernel. Libpager releases the
++     supplied write buffer itself after this callback returns. */
++  return 0;
 +}
 +
 +error_t
@@ -374,10 +441,10 @@ index ad5e2983..2df2829c 100644
    err = diskfs_alloc_node (0, S_IFDIR, &diskfs_root_node);
    if (err)
 diff --git a/tmpfs/tmpfs.h b/tmpfs/tmpfs.h
-index aed13e87..38c0becc 100644
+index aed13e87..e796dec5 100644
 --- a/tmpfs/tmpfs.h
 +++ b/tmpfs/tmpfs.h
-@@ -21,10 +21,17 @@ the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.  */
+@@ -21,10 +21,18 @@ the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.  */
  #define _tmpfs_h 1
  
  #include <hurd/diskfs.h>
@@ -390,12 +457,13 @@ index aed13e87..38c0becc 100644
 +{
 +  pthread_mutex_t lock;
 +  vm_size_t size;
++  off_t eof;
 +};
 +
  struct disknode
  {
    uint_fast8_t type;		/* DT_REG et al */
-@@ -48,6 +55,7 @@ struct disknode
+@@ -48,6 +56,7 @@ struct disknode
      {
        mach_port_t memobj, ro_memobj;
        vm_address_t memref;
@@ -403,7 +471,7 @@ index aed13e87..38c0becc 100644
        unsigned int allocpages;	/* largest size while memobj was live */
      } reg;
      struct
-@@ -71,6 +79,7 @@ struct tmpfs_dirent
+@@ -71,6 +80,7 @@ struct tmpfs_dirent
  
  extern off_t tmpfs_page_limit;
  extern mach_port_t default_pager;
