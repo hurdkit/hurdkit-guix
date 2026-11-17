@@ -11,7 +11,7 @@
 
 (define os
   (operating-system-with-hurd (load "hurd64.scm") hurd-shm
-                              #:kernel gnumach-shm))
+                              #:kernel gnumach-hurdkit))
 
 (operating-system
   (inherit os)
