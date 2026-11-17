@@ -7,7 +7,7 @@
   #:use-module (guix packages)
   #:use-module (guix utils))
 
-(define %hurd-epoll-shim-commit "1a7c553a5f6069e6e69b59e7e5058d074cfd5501")
+(define %hurd-epoll-shim-commit "35c97ea2740f9829d6267680fa24764871147d04")
 
 (define-public hurd-epoll-shim
   (package
@@ -21,7 +21,7 @@
              (commit %hurd-epoll-shim-commit)))
        (file-name (git-file-name name version))
        (sha256
-        (base32 "0aqa7864qmhbzp7skpzdh5w2m18angwjgg4zsr87q42h1m41li8f"))))
+        (base32 "09jp81kkyg9cd5yprk1jr4i5mwygaqwyya1623bqccjh7qnjzdgl"))))
     (build-system gnu-build-system)
     (arguments
      (list
