@@ -1,0 +1,26 @@
+Install the test programs, so that a cross-built Wayland can be tested
+on the system it was built for.
+diff --git a/tests/meson.build b/tests/meson.build
+index 6ada520..c665cff 100644
+--- a/tests/meson.build
++++ b/tests/meson.build
+@@ -57,7 +57,8 @@ tests_protocol_c = custom_target(
+ exec_fd_leak_checker = executable(
+ 	'exec-fd-leak-checker',
+ 	'exec-fd-leak-checker.c',
+-	dependencies: test_runner_dep
++	dependencies: test_runner_dep,
++	install: true, install_dir: get_option('prefix') / 'libexec/wayland-tests'
+ )
+ 
+ if add_languages('cpp', native: false)
+@@ -201,7 +202,8 @@ foreach test_name, test_extras : tests
+ 	test_runtime_deps = test_extras.get('runtime_deps', [])
+ 	test_sources = [ test_name + '.c' ] + test_extra_sources
+ 	test_deps = [test_runner_dep, epoll_dep]
+-	bin = executable(test_name, test_sources, dependencies: test_deps)
++	bin = executable(test_name, test_sources, dependencies: test_deps,
++		install: true, install_dir: get_option('prefix') / 'libexec/wayland-tests')
+ 	test(
+ 		test_name,
+ 		bin,

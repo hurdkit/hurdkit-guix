@@ -1,0 +1,33 @@
+Count the open descriptors on GNU/Hurd by probing them.
+
+The test runner compares the number of open descriptors before and after
+a test, and reads it from a listing of /dev/fd.  On the Hurd /dev/fd
+resolves a descriptor by its number but does not list the open ones.
+diff --git a/tests/test-helpers.c b/tests/test-helpers.c
+index 1af813b..a0e9e3f 100644
+--- a/tests/test-helpers.c
++++ b/tests/test-helpers.c
+@@ -88,6 +88,23 @@ count_open_fds(void)
+ 	/* return the current number of entries */
+ 	return size / sizeof(struct kinfo_file);
+ }
++#elif defined(__GNU__)
++#include <fcntl.h>
++
++/*
++ * On GNU/Hurd, /dev/fd does not list the open descriptors: ask about every
++ * one that could be open.
++ */
++int
++count_open_fds(void)
++{
++	int fd, count = 0, max = (int) sysconf(_SC_OPEN_MAX);
++
++	for (fd = 0; fd < max; fd++)
++		if (fcntl(fd, F_GETFD) != -1)
++			count++;
++	return count;
++}
+ #else
+ int
+ count_open_fds(void)

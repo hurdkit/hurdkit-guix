@@ -1,0 +1,20 @@
+Use epoll-shim on GNU/Hurd, as on FreeBSD and OpenBSD.
+
+The Hurd has no epoll, eventfd, timerfd or signalfd.  hurd-epoll-shim
+provides them under the same pkg-config name.
+diff --git a/meson.build b/meson.build
+index 2c010be..910f76a 100644
+--- a/meson.build
++++ b/meson.build
+@@ -74,9 +74,8 @@ endif
+ config_h.set10('HAVE_BROKEN_MSG_CMSG_CLOEXEC', have_broken_msg_cmsg_cloexec)
+ 
+ if get_option('libraries')
+-	if host_machine.system() in ['freebsd', 'openbsd']
+-		# When building for FreeBSD, epoll(7) is provided by a userspace
+-		# wrapper around kqueue(2).
++	if host_machine.system() in ['freebsd', 'openbsd', 'gnu']
++		# On the Hurd the userspace wrapper uses poll() and threads.
+ 		epoll_dep = dependency('epoll-shim')
+ 	else
+ 		# Otherwise, assume that epoll(7) is supported natively.

@@ -1,0 +1,30 @@
+Accept clients on GNU/Hurd, whose local sockets have no SO_PEERCRED.
+
+Report the server's own user and group and no pid: only that user can
+reach a socket in the mode-0700 XDG_RUNTIME_DIR.
+diff --git a/src/wayland-os.c b/src/wayland-os.c
+index f00ead4..bf96ef1 100644
+--- a/src/wayland-os.c
++++ b/src/wayland-os.c
+@@ -85,7 +85,20 @@ wl_os_socket_cloexec(int domain, int type, int protocol)
+ 	return set_cloexec_or_close(fd);
+ }
+ 
+-#if defined(__FreeBSD__)
++#if defined(__GNU__)
++int
++wl_os_socket_peercred(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid)
++{
++	/* pflocal has no SO_PEERCRED. Clients use a socket in the user's
++	 * mode-0700 XDG_RUNTIME_DIR, so only same-user clients are accepted.
++	 * There is no pid to report: callers must not use 0 for identification.
++	 */
++	*uid = getuid();
++	*gid = getgid();
++	*pid = 0;
++	return 0;
++}
++#elif defined(__FreeBSD__)
+ int
+ wl_os_socket_peercred(int sockfd, uid_t *uid, gid_t *gid, pid_t *pid)
+ {
