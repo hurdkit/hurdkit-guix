@@ -92,6 +92,17 @@ guix-screenshot:
 stage1-check:
 	@bash scripts/stage1_check.sh
 
+# --- The Wayland guest (guix/hurd64-wayland.scm): libwayland and a
+# software Mesa. stage2-reference renders the frames on this machine only. ---
+
+.PHONY: stage2-check stage2-reference
+
+stage2-check:
+	@bash scripts/stage2_check.sh
+
+stage2-reference:
+	@bash scripts/stage2_check.sh reference
+
 # --- Driver tests in a separate, disposable guest (guix/hurd64-drivers.scm,
 # img/guix-drivers/). The drivers and the test matrices are Guix packages
 # at pinned commits ((hurdkit packages virtio)); the scripts of the working

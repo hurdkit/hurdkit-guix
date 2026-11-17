@@ -188,6 +188,46 @@ programs in it; `scripts/stage1_check.sh` lists them. The guest has:
   polling on the Hurd), built by goonix's cargo build system once the Rust
   standard library builds for the Hurd (`(hurdkit packages rust)`).
 
+### Wayland guest
+
+`make stage2-check` is the gate of the niri plan's stage 2: libwayland and
+a software Mesa on the Hurd, without a GPU device. It
+
+1. builds the test programs of `tests/graphics` for this machine and
+   renders the reference frames with them (`make stage2-reference` does
+   only this);
+2. builds `guix/hurd64-wayland.scm` into `img/guix-wayland/` and boots it
+   on its own port;
+3. runs `stage2_guest.sh` in the guest: libwayland's own tests
+   (`wayland_tests.sh`), then the same programs;
+4. compares the guest's frames with the reference, and checks the
+   renderer, the clients' run time and the compositor's CPU time while
+   idle. `scripts/stage2_check.sh` names the limits and their variables.
+
+The programs: `egl-triangle` renders a fixed scene with surfaceless EGL;
+`wl-test-server` is a small compositor that writes every committed buffer
+to a PPM file; `wl-shm-client` draws into shared memory, and
+`wl-egl-client` draws the scene through EGL's Wayland platform.
+
+The packages:
+
+- `(hurdkit packages wayland)`: `wayland-hurd` uses `hurd-epoll-shim` for
+  its event loop and accepts clients without `SO_PEERCRED`, which pflocal
+  does not have: it reports its own user and no pid, so a compositor
+  cannot tell clients apart by pid. Its `tests` output holds libwayland's
+  test programs; they count their open descriptors by probing each one,
+  because the Hurd's `/dev/fd` does not list them.
+  `wayland-protocols-hurd`, `libxkbcommon-hurd` and the Cairo and Pango
+  variants (no X11, no printing backends) are built against it.
+- `(hurdkit packages mesa)`: `mesa-hurd` has softpipe and virgl over vtest,
+  EGL with the surfaceless and Wayland platforms, and GLES; no LLVM, GBM,
+  GLX or libdrm.
+- `(hurdkit packages graphics)`: `hurdkit-graphics-tests`, the programs and
+  the guest's scripts.
+
+When one of these is cross-built, `wayland-scanner` and the protocol
+descriptions come from goonix's own Wayland for the build machine.
+
 ### Driver tests
 
 ```sh
@@ -368,5 +408,6 @@ when its checks pass and prints what failed otherwise.
 | The guest boots, answers and halts | `make guix-image guix-start guix-ssh-peon guix-stop` |
 | The guest with Hurdkit's GNU Mach and Hurd | `GUIX_DIR=$PWD/img/guix-hurdkit GUIX_SSH_PORT=2225 GUIX_OS=$PWD/guix/hurd64-hurdkit.scm bash scripts/guix_vm.sh image`, then `start`, `ssh root ps -ef` and `stop` the same way |
 | The platform guest's tests | `make stage1-check` |
+| The Wayland guest's tests | `make stage2-check` |
 | The driver matrices | `make guix-virtio-test guix-virtio-balloon-test guix-virtio-blk-test` (see G20 for the first) |
 | The graphics gate | `make stage0-check` |
