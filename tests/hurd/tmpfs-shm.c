@@ -8,10 +8,10 @@
    instead of the whole run.  The output is TAP.  It runs on Linux too
    (DIRECTORY=/dev/shm), which checks the expectations themselves.
 
-   Without the fixes of hurd-shm and gnumach-hurdkit, the shrink cases stop
-   GNU Mach in its debugger (vm_map_copyin_page_list: Assertion
-   `m->wire_count == 1'), and the msync cases lose the pages of a guest
-   that has no swap.  Nothing here puts the guest under memory pressure:
+   On a GNU Mach without the default pager fixes of gnumach-hurdkit, the
+   shrink cases stop the kernel in its debugger
+   (vm_map_copyin_page_list: Assertion `m->wire_count == 1'), and the
+   msync cases lose the pages of a guest that has no swap.  Nothing here puts the guest under memory pressure:
    without swap, pages that the kernel evicts are still lost.  */
 
 #define _GNU_SOURCE

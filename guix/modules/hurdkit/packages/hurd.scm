@@ -58,12 +58,10 @@
        ((#:parallel-build? _ #t) #f)))
     (synopsis "The Hurd from Hurdkit's branch, at a pinned commit")))
 
-;; The two variants below carry fixes that are posted to
-;; github.com/hurdkit/hurd. Each goes away when the pin above includes its
-;; fix.
-
 ;; tmpfs keeps the mappings of an unlinked file working after its last
-;; close, as shared memory (shm_open, Wayland buffers) needs.
+;; close, as shared memory (shm_open, Wayland buffers) needs. The fix is
+;; posted to github.com/hurdkit/hurd; this variant goes away when the
+;; pinned commit has it.
 (define-public hurd-tmpfs-mapped
   (package
     (inherit hurd-hurdkit)
@@ -75,18 +73,3 @@
         (append (origin-patches (package-source hurd-hurdkit))
                 (list (hurdkit-patch "hurd-tmpfs-keep-mapped.patch"))))))
     (synopsis "The Hurd with mappings of unlinked tmpfs files kept")))
-
-;; Shared memory on a tmpfs also needs the default pager to keep the last
-;; page of a file that is truncated in the middle of a page. GNU Mach's
-;; part of this is in gnumach-hurdkit.
-(define-public hurd-shm
-  (package
-    (inherit hurd-tmpfs-mapped)
-    (name "hurd-shm")
-    (source
-     (origin
-       (inherit (package-source hurd-tmpfs-mapped))
-       (patches
-        (append (origin-patches (package-source hurd-tmpfs-mapped))
-                (list (hurdkit-patch "hurd-defpager-truncate-copy.patch"))))))
-    (synopsis "The Hurd with the fixes for shared memory on a tmpfs")))
