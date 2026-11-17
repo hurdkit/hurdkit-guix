@@ -172,14 +172,12 @@ guest, `ps -ef` shows every translator from the one Hurd.
 `img/guix-platform/`, boots it on its own port and runs the platform's test
 programs in it; `scripts/stage1_check.sh` lists them. The guest has:
 
-- `hurd-tmpfs-mapped`, which is `hurd-hurdkit` with
-  `guix/patches/hurd-tmpfs-keep-mapped.patch`: when the last reference to
-  an unlinked file goes away, tmpfs no longer shrinks its memory object to
-  zero, so the file's mappings keep working. `tmpfs-shm DIRECTORY`
-  (`tests/hurd/tmpfs-shm.c`) checks it on `/dev/shm`, and on ext2 as the
-  control; it also runs on Linux. The fix is posted to
-  github.com/hurdkit/hurd; the patch file goes when the pinned commit has
-  it. The test's truncation and `msync` cases need `gnumach-hurdkit` (G22).
+- `tmpfs-shm DIRECTORY` (`tests/hurd/tmpfs-shm.c`), the shared memory
+  test. When the last reference to an unlinked file goes away, the tmpfs
+  of `hurd-hurdkit` does not shrink the file's memory object to zero, so
+  its mappings keep working. The test checks that on `/dev/shm`, and on
+  ext2 as the control; it also runs on Linux. Its truncation and `msync`
+  cases need `gnumach-hurdkit` (G22).
 - `hurd-epoll-shim`, the epoll, eventfd, timerfd and signalfd library for
   the libwayland port, with its TAP suites (`hurd-epoll-shim-test-NAME`).
   It lives in its own repository, github.com/hurdkit/hurd-epoll-shim, and
