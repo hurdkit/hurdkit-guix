@@ -327,7 +327,15 @@ repeated_cycles (int cycles)
         }
       munmap (map, length);
     }
+  /* A filesystem frees the blocks of an unlinked file once the kernel has
+     let go of its memory object, which it does after munmap has
+     returned: give that a moment.  */
   unsigned long after = free_blocks ();
+  for (int wait = 0; after != before && wait < 500; wait++)
+    {
+      usleep (10000);
+      after = free_blocks ();
+    }
   if (after != before)
     {
       fprintf (stderr, "# free blocks: %lu before, %lu after\n", before,
