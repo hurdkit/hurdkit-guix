@@ -15,7 +15,7 @@
   #:use-module (gnu packages xorg)
   #:use-module (hurdkit utils))
 
-(define %virtio-commit "ce266bbe3b1a88093f24ca5986c2409414847cc2")
+(define %virtio-commit "9fea3019ae0e5859fe4173ad28cfadcc62f3fa1e")
 
 ;; These are source/header inputs to a cross build, not a native Hurd toolchain.
 ;; In particular the Hurd core-header union contains the .defs consumed by MIG.
@@ -62,7 +62,7 @@ needed to generate and compile the virtio Mach-device server.")
              (commit %virtio-commit)))
        (file-name (git-file-name name version))
        (sha256
-        (base32 "09crba5rghijf9j1a7x9wiavd7va80wpv100nrajzwd9qc9j5sb1"))))
+        (base32 "1kqbwqhdicwslag3vsikj6vnvxj3g9ncm6dlmsdfkm6g1s7pd05y"))))
     (build-system gnu-build-system)
     (arguments
      (list
@@ -97,17 +97,19 @@ needed to generate and compile the virtio Mach-device server.")
               (for-each
                (lambda (binary)
                  (install-file binary (string-append #$output "/bin")))
-               '("virtio-9p" "virtio-balloon" "virtio-blk" "vblk-client")))))))
+               '("virtio-9p" "virtio-balloon" "virtio-blk" "vblk-client"
+                 "virtio-net" "vnet-client")))))))
     (native-inputs
      (list (list "cross-mig" (cross-mig (%current-target-system)))
            (native-cross-input "hurd-virtio-headers" hurd-virtio-headers)))
     (inputs (list hurd libirqhelp libpciaccess-static))
     (supported-systems '("x86_64-gnu"))
     (home-page "https://github.com/hurdkit/virtio")
-    (synopsis "Hurdkit virtio-9p, balloon and block drivers")
+    (synopsis "Hurdkit virtio-9p, balloon, block and network drivers")
     (description "Build the shared Hurdkit virtio transport, the 9p
-translator, the balloon daemon, the block driver and its Mach-device client
-against the Guix Hurd libraries. MIG generates the block-device server stubs.")
+translator, the balloon daemon, and the block and network drivers with their
+Mach-device clients, against the Guix Hurd libraries. MIG generates the
+device server stubs; the network driver compiles the Hurd's libbpf in.")
     (license license:gpl3+)))
 
 ;; The 9P2000.L client translator that mounts a virtio-9p share.
@@ -160,7 +162,7 @@ by a 9P2000.L server, such as QEMU's virtio-9p device.")
 ;; scripts/guix_virtio_test.sh runs this snapshot against the
 ;; drivers pinned above. To move to newer matrices, change the commit and
 ;; the hash here, then adapt guix_virtio_test.sh to what they expect.
-(define %matrices-commit "7742f4893298ac218539853a44807a47d6a726b4")
+(define %matrices-commit "36c4fd6d2548a008a996cff761a62cfc52f4116c")
 
 (define-public hurdkit-virtio-matrices
   (package
@@ -174,7 +176,7 @@ by a 9P2000.L server, such as QEMU's virtio-9p device.")
              (commit %matrices-commit)))
        (file-name (git-file-name name version))
        (sha256
-        (base32 "16i8mmdnsqz5qns14zwhff61h50cn3dvap224czqd1l3fbp5qhyh"))))
+        (base32 "1ja5956qkxygwbj86iap1v5x87c4xw3zgx2bpvixa83mv1qrvy31"))))
     (build-system copy-build-system)
     (arguments
      (list #:install-plan

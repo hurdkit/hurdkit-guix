@@ -109,7 +109,8 @@ stage2-reference:
 # tree are not used. REUSE=1 reruns a matrix on the guest that a failed run
 # left running. ---
 
-.PHONY: guix-virtio-test guix-virtio-balloon-test guix-virtio-blk-test
+.PHONY: guix-virtio-test guix-virtio-balloon-test guix-virtio-blk-test \
+	guix-virtio-net-test
 
 guix-virtio-test:
 	@bash scripts/guix_virtio_test.sh 9p
@@ -119,6 +120,9 @@ guix-virtio-balloon-test:
 
 guix-virtio-blk-test:
 	@bash scripts/guix_virtio_test.sh blk
+
+guix-virtio-net-test:
+	@bash scripts/guix_virtio_test.sh net
 
 # --- Graphics (skills/GUIX.md). The defaults leave the guest headless. ---
 

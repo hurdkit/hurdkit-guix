@@ -232,6 +232,7 @@ descriptions come from goonix's own Wayland for the build machine.
 make guix-virtio-test          # virtio-9p and 9pfs
 make guix-virtio-balloon-test
 make guix-virtio-blk-test
+make guix-virtio-net-test      # a second card; SSH stays on the e1000
 ```
 
 Each target runs one test matrix of Hurdkit's virtio drivers against a
@@ -407,5 +408,5 @@ when its checks pass and prints what failed otherwise.
 | The guest with Hurdkit's GNU Mach and Hurd | `GUIX_DIR=$PWD/img/guix-hurdkit GUIX_SSH_PORT=2225 GUIX_OS=$PWD/guix/hurd64-hurdkit.scm bash scripts/guix_vm.sh image`, then `start`, `ssh root ps -ef` and `stop` the same way |
 | The platform guest's tests | `make stage1-check` |
 | The Wayland guest's tests | `make stage2-check` |
-| The driver matrices | `make guix-virtio-test guix-virtio-balloon-test guix-virtio-blk-test` (see G20 for the first) |
+| The driver matrices | `make guix-virtio-test guix-virtio-balloon-test guix-virtio-blk-test guix-virtio-net-test` (see G20 for the first) |
 | The graphics gate | `make stage0-check` |

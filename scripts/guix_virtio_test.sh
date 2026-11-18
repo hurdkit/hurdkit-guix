@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the virtio driver test matrices in the Guix GNU/Hurd guest.
 #
-# Usage: guix_virtio_test.sh 9p|balloon|blk
+# Usage: guix_virtio_test.sh 9p|balloon|blk|net
 #
 # Drivers and matrices are Guix packages at pinned commits, see
 # (hurdkit packages virtio): this script never runs the scripts of the
@@ -42,8 +42,12 @@ case "$device" in
         matrix=virtio_blk_test.py
         trace_prefix=virtio_blk_
         ;;
+    net)
+        matrix=virtio_net_test.py
+        trace_prefix=virtio_net_
+        ;;
     *)
-        echo "usage: guix_virtio_test.sh 9p|balloon|blk" >&2
+        echo "usage: guix_virtio_test.sh 9p|balloon|blk|net" >&2
         exit 2
         ;;
 esac
@@ -90,6 +94,8 @@ export VIRTIO_9P_BIN="$virtio/bin/virtio-9p"
 export VIRTIO_BALLOON_BIN="$virtio/bin/virtio-balloon"
 export VIRTIO_BLK_BIN="$virtio/bin/virtio-blk"
 export VBLK_CLIENT_BIN="$virtio/bin/vblk-client"
+export VIRTIO_NET_BIN="$virtio/bin/virtio-net"
+export VIRTIO_NET_CLIENT_BIN="$virtio/bin/vnet-client"
 export P9FS_BIN="${stores[1]}/bin/9pfs"
 # The matrices run on the host, so they are not built for the guest.
 if [[ -n "${VIRTIO_MATRICES:-}" ]]; then
@@ -126,6 +132,15 @@ case "$device" in
         fi
         device_args=(-drive "if=none,id=vd0,file=$TEST_DISK,format=raw,cache=writeback"
                      -device "virtio-blk-pci,drive=vd0,disable-legacy=off,addr=0x5")
+        ;;
+    net)
+        # A second network card with its own user-mode backend; SSH stays
+        # on the guest's e1000. guix_vm.sh keeps -netdev for that one, so
+        # this card is a -nic, which takes no device properties: the
+        # legacy interface that the driver speaks is switched on for the
+        # device type.
+        device_args=(-global "virtio-net-pci.disable-legacy=off"
+                     -nic "user,model=virtio-net-pci")
         ;;
 esac
 

@@ -23,7 +23,8 @@ esac
 SH
 # The matrices: record where they ran from and their environment; fail
 # when FAKE_MATRIX_FAILS=1.
-for matrix in virtio_test.py virtio_balloon_test.py virtio_blk_test.py; do
+for matrix in virtio_test.py virtio_balloon_test.py virtio_blk_test.py \
+    virtio_net_test.py; do
     cat > "$MATRICES/$matrix" <<'PY'
 import os, sys
 with open(os.path.join(os.environ["TEST_DIR"], "matrix"), "a") as log:
@@ -31,8 +32,9 @@ with open(os.path.join(os.environ["TEST_DIR"], "matrix"), "a") as log:
     log.write(" ".join([os.path.basename(sys.argv[0])] + sys.argv[1:]) + "\n")
     log.write("cwd=%s\n" % os.getcwd())
     for name in ("VIRTIO_9P_BIN", "P9FS_BIN", "VIRTIO_BALLOON_BIN",
-                 "VIRTIO_BLK_BIN", "VBLK_CLIENT_BIN", "SSH_PORT", "QEMU_LOG",
-                 "SHARE", "TEST_DISK", "REUSE"):
+                 "VIRTIO_BLK_BIN", "VBLK_CLIENT_BIN", "VIRTIO_NET_BIN",
+                 "VIRTIO_NET_CLIENT_BIN", "SSH_PORT", "QEMU_LOG", "SHARE",
+                 "TEST_DISK", "REUSE"):
         log.write("%s=%s\n" % (name, os.environ.get(name, "")))
 sys.exit(1 if os.environ.get("FAKE_MATRIX_FAILS") == "1" else 0)
 PY
@@ -49,7 +51,8 @@ esac
 SH
 cat > "$TEST_DIR/bin/qemu-system-x86_64" <<'SH'
 #!/usr/bin/env bash
-printf '%s\n' v9fs_walk v9fs_read virtio_balloon_set_config virtio_blk_req_complete
+printf '%s\n' v9fs_walk v9fs_read virtio_balloon_set_config virtio_blk_req_complete \
+    virtio_net_handle_announce
 SH
 chmod +x "$TEST_DIR/bin/"*
 
@@ -134,5 +137,11 @@ check 'blk seeds a test disk and attaches it' \
     bash -c 'grep -qx "virtio_blk_test.py seed $1/guest/test-disk.img 64" "$1/matrix" && grep "^start -- " "$1/calls" | grep -q "file=$1/guest/test-disk.img.*virtio-blk-pci"' _ "$TEST_DIR"
 check 'blk runs its matrix with the client binary' \
     matrix_has "VBLK_CLIENT_BIN=$TEST_DIR/store/virtio/bin/vblk-client"
+
+run net
+check 'net attaches a second network card with its own backend' \
+    bash -c 'grep "^start -- " "$1" | grep -q -- "-trace enable=virtio_net_handle_announce .*-global virtio-net-pci.disable-legacy=off -nic user,model=virtio-net-pci"' _ "$TEST_DIR/calls"
+check 'net runs its matrix with the driver and the client binary' \
+    bash -c 'grep -qx "VIRTIO_NET_BIN=$1/store/virtio/bin/virtio-net" "$1/matrix" && grep -qx "VIRTIO_NET_CLIENT_BIN=$1/store/virtio/bin/vnet-client" "$1/matrix"' _ "$TEST_DIR"
 echo "1..$number"
 exit "$failures"
