@@ -257,6 +257,12 @@ newer drivers or matrices, move the pins in the module and adapt
 `guix_virtio_test.sh` to what the new matrices expect; `VIRTIO_SRC=DIR` and
 `VIRTIO_MATRICES=DIR` try a local checkout first.
 
+The drivers are compiled against the source tree of the Hurd that they link
+with, goonix's. One directory of it is replaced: the network driver
+compiles `libbpf` in, and `hurd-virtio-headers` takes that from the pinned
+`hurd-hurdkit` source, as Hurdkit's own build takes it from its Hurd
+checkout.
+
 After a passing matrix the guest has to shut down cleanly. A failed matrix
 leaves the guest running and prints how to reach it; `REUSE=1` runs the
 matrix again on that guest.

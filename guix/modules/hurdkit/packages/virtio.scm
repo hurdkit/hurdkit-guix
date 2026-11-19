@@ -13,6 +13,7 @@
   #:use-module (gnu packages cross-base)
   #:use-module (gnu packages hurd)
   #:use-module (gnu packages xorg)
+  #:use-module (hurdkit packages hurd)
   #:use-module (hurdkit utils))
 
 (define %virtio-commit "811e00c4d350a62fba901bd5ec2c232985b4adad")
@@ -31,23 +32,30 @@
     (source #f)
     (build-system trivial-build-system)
     (arguments
-     '(#:modules ((guix build union))
-       #:builder
-       (begin
-         (use-modules (guix build union))
-         (union-build (assoc-ref %outputs "out")
-                      (map cdr %build-inputs)))))
-    (inputs (map (lambda (package)
-                   (cadr (native-cross-input "input" package)))
-                 (list (with-parameters ((%current-target-system #f))
-                         (cross-kernel-headers "x86_64-pc-gnu"))
-                       (package-source hurd-headers)
-                       (package-source gnumach-headers))))
+     (list
+      #:modules '((guix build union))
+      #:builder
+      #~(begin
+          (use-modules (guix build union))
+          (union-build #$output
+                       (list #+(with-parameters ((%current-target-system #f))
+                                 (cross-kernel-headers "x86_64-pc-gnu"))
+                             #+(package-source hurd-headers)
+                             #+(package-source gnumach-headers)))
+          ;; The network driver compiles libbpf in, and Hurdkit's own build
+          ;; takes it from Hurdkit's Hurd, so the directory comes from
+          ;; there.  The rest stays the tree of the Hurd whose libraries the
+          ;; drivers link against.
+          (let ((libbpf (string-append #$output "/libbpf")))
+            (delete-file libbpf)
+            (symlink (string-append #+(package-source hurd-hurdkit) "/libbpf")
+                     libbpf)))))
     (supported-systems '("x86_64-linux" "x86_64-gnu"))
     (home-page "https://www.gnu.org/software/hurd/")
     (synopsis "Cross Hurd headers and MIG definitions for virtio")
     (description "The guest's Hurd headers, Mach headers, and source definitions
-needed to generate and compile the virtio Mach-device server.")
+needed to generate and compile the virtio Mach-device server.  The libbpf
+directory is the one of Hurdkit's Hurd.")
     (license (package-license hurd-headers))))
 
 (define-public hurdkit-virtio
@@ -109,7 +117,8 @@ needed to generate and compile the virtio Mach-device server.")
     (description "Build the shared Hurdkit virtio transport, the 9p
 translator, the balloon daemon, and the block and network drivers with their
 Mach-device clients, against the Guix Hurd libraries. MIG generates the
-device server stubs; the network driver compiles the Hurd's libbpf in.")
+device server stubs; the network driver compiles the libbpf of Hurdkit's Hurd
+in.")
     (license license:gpl3+)))
 
 ;; The 9P2000.L client translator that mounts a virtio-9p share.
