@@ -60,6 +60,9 @@ export GUIX_DIR="${GUIX_DIR:-$REPO_ROOT/img/guix-drivers}"
 export GUIX_SSH_PORT="${GUIX_SSH_PORT:-2231}"
 export GUIX_OS="$REPO_ROOT/guix/hurd64-drivers.scm"
 export GUIX_MEMORY="${GUIX_MEMORY:-2048}"
+# The guest boots gnumach-hurdkit-smp; give it as many processors as that
+# kernel is built for.
+export GUIX_CPUS="${GUIX_CPUS:-2}"
 export SSH_KEY_DIR="${SSH_KEY_DIR:-$REPO_ROOT/img/keys}"
 export SSH_HOST="${SSH_HOST:-127.0.0.1}"
 # What the matrices read (see their docstrings).

@@ -29,6 +29,25 @@
         (base32 "1g1i2vi4s29nq19r0npn8vhfb2a44ziwamrsk4szlvvn195y619n"))))
     (synopsis "GNU Mach from Hurdkit's branch, at a pinned commit")))
 
+;; The same source built for several processors. The number is a
+;; compile-time upper bound; Hurdkit's own harness builds and boots this
+;; kernel with as many processors as the bound, and so do our guests
+;; (GUIX_CPUS in guix.mk). Tickless idle (--enable-tickless) is a
+;; uniprocessor option of the same source and is left off.
+(define %gnumach-smp-cpus 2)
+
+(define-public gnumach-hurdkit-smp
+  (package
+    (inherit gnumach-hurdkit)
+    (name "gnumach-hurdkit-smp")
+    (arguments
+     (substitute-keyword-arguments (package-arguments gnumach-hurdkit)
+       ((#:configure-flags flags ''())
+        `(cons ,(string-append "--enable-ncpus="
+                               (number->string %gnumach-smp-cpus))
+               ,flags))))
+    (synopsis "GNU Mach from Hurdkit's branch, for several processors")))
+
 ;; The Hurd servers and libraries. The two local patches adapt this newer
 ;; source to the older rumpkernel and GNU Mach headers that goonix builds
 ;; it against; goonix's own libports patch still applies.

@@ -14,7 +14,7 @@
   (inherit base)
   ;; The balloon and block matrices need the shared-interrupt fixes of
   ;; Hurdkit's GNU Mach.
-  (kernel gnumach-hurdkit)
+  (kernel gnumach-hurdkit-smp)
   (essential-services (hurd-default-essential-services this-operating-system))
   (packages (append (list hurdkit-virtio hurd-9pfs hurdkit-guest-compat)
                     (operating-system-packages base))))

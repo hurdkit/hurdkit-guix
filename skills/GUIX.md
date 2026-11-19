@@ -160,6 +160,15 @@ commit that the module pins. `hurd-hurdkit` carries two compatibility
 patches for goonix's older rumpkernel and GNU Mach headers, and builds
 serially (G23).
 
+`gnumach-hurdkit-smp` is the same kernel source built for several
+processors (`--enable-ncpus`, a compile-time upper bound that the module
+sets). The guests of this repository boot it; start one with `GUIX_CPUS`
+set to that bound, which `scripts/guix_vm.sh` passes to QEMU as `-smp`
+(empty means QEMU's default of one). To go back to one processor, name
+`gnumach-hurdkit` as a guest's `#:kernel`. Tickless idle
+(`--enable-tickless`) is a uniprocessor option of the same source and is
+not enabled.
+
 `operating-system-with-hurd` from `(hurdkit system)` replaces the Hurd of a
 system: the boot servers, and also `pfinet`, the console, getty and login,
 whose services otherwise keep starting goonix's default Hurd. In such a
@@ -256,8 +265,8 @@ device, `GUIX_DISPLAY` (`none`, `egl-headless`, `gtk`) the display, and
 driver in sysfs. For Venus, the host's Vulkan ICD of that GPU is selected
 through `VK_DRIVER_FILES`; `GUIX_VK_DEVICE` and `GUIX_VK_ICD_FILE` override
 it. `GUIX_TRACE='virtio_gpu_cmd_*'` records QEMU trace events into
-`GUIX_TRACE_FILE`, `GUIX_CPUS` sets the number of CPUs, and
-`GUIX_QEMU_ARGS` adds QEMU options. The defaults leave the guest as it was.
+`GUIX_TRACE_FILE`, and `GUIX_QEMU_ARGS` adds QEMU options. The defaults
+leave the guest as it was.
 
 Every guest has a QMP socket next to its monitor socket. `make guix-qmp
 GUIX_QMP_ARGS=...` runs `scripts/qmp.tcl`: `status`, `screenshot FILE

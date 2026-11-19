@@ -32,6 +32,8 @@ REPO_ROOT="${GUIX_REPO_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 GUIX_SSH_PORT="${GUIX_SSH_PORT:-2223}"
 GUIX_DIR="${GUIX_DIR:-$REPO_ROOT/img/guix}"
 GUIX_MEMORY="${GUIX_MEMORY:-2048}"
+# Virtual CPUs; empty means QEMU's default of one.
+GUIX_CPUS="${GUIX_CPUS:-}"
 QMP_SOCKET="${QMP_SOCKET:-${XDG_RUNTIME_DIR:-/tmp}/hurdkit-guix-${GUIX_SSH_PORT}.qmp}"
 source "$SCRIPT_DIR/guix_qemu_options.sh"
 
@@ -160,8 +162,9 @@ kill_qemu() {
 qemu_command() {
     local disk="$1"
     local -a caller_args=("${@:2}")
-    local -a accel=() extra=()
+    local -a accel=() cpus=() extra=()
     guix_qemu_options || return 1
+    [[ -z "$GUIX_CPUS" ]] || cpus=(-smp "$GUIX_CPUS")
     if declare -p GUIX_VM_EXTRA_ARGS >/dev/null 2>&1; then
         extra=("${GUIX_VM_EXTRA_ARGS[@]}")
     fi
@@ -181,7 +184,7 @@ qemu_command() {
     # -M q35: required for the 64-bit Hurd, the default machine type has
     # problems with memory above 4 GB of address space.
     # e1000: the network card the guest has a driver for.
-    "$QEMU_SYSTEM" -M q35 "${accel[@]}" -m "$GUIX_MEMORY" \
+    "$QEMU_SYSTEM" -M q35 "${accel[@]}" -m "$GUIX_MEMORY" "${cpus[@]}" \
         -device e1000,netdev=net0 \
         -netdev "user,id=net0,hostfwd=tcp:${SSH_HOST}:${GUIX_SSH_PORT}-:${GUEST_SSH_PORT}" \
         -hda "$disk" "${GUIX_QEMU_OPTIONS[@]}" "${extra[@]}" "${caller_args[@]}"

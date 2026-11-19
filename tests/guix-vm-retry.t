@@ -163,8 +163,9 @@ else
     sed 's/^/# /' "$stop_dir/output"
     failures=1
 fi
-# Persistent mode accepts the same optional QEMU arguments. A fake QEMU
-# failure avoids entering the real offline filesystem repair chain.
+# Persistent mode accepts the same optional QEMU arguments, and GUIX_CPUS
+# sets the number of virtual CPUs. A fake QEMU failure avoids entering the
+# real offline filesystem repair chain.
 cat > "$TEST_DIR/bin/qemu-system-x86_64" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' -- "$@" > "$TEST_DIR/persist.argv"
@@ -173,18 +174,18 @@ SH
 rm -f "$TEST_DIR/guix/qemu.pid"
 set +e
 PATH="$TEST_DIR/bin:$PATH" GUIX_DIR="$TEST_DIR/guix" GUIX_SCRIPT_DIR="$REPO_ROOT/scripts" GUIX_REPO_ROOT="$REPO_ROOT" \
-    SSH_KEY_DIR="$TEST_DIR/keys" GUIX_BOOT_TIMEOUT=1 GUIX_BOOT_ATTEMPTS=1 \
+    SSH_KEY_DIR="$TEST_DIR/keys" GUIX_BOOT_TIMEOUT=1 GUIX_BOOT_ATTEMPTS=1 GUIX_CPUS=4 \
     bash "$REPO_ROOT/scripts/guix_vm.sh" start persist -- \
-    -smp 4 -device virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare \
+    -device virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare \
     > "$TEST_DIR/persist-output" 2>&1
 persist_rc=$?
 set -e
 if (( persist_rc != 0 )) &&
    grep -F -x -A1 -- '-smp' "$TEST_DIR/persist.argv" | tail -n 1 | grep -Fxq 4 &&
    grep -F -x -A1 -- '-device' "$TEST_DIR/persist.argv" | grep -Fxq 'virtio-9p-pci,fsdev=hostshare,mount_tag=hostshare'; then
-    ok 'persistent mode forwards QEMU options'
+    ok 'persistent mode forwards QEMU options and the CPU count'
 else
-    not_ok 'persistent mode dropped its QEMU options'
+    not_ok 'persistent mode dropped its QEMU options or the CPU count'
     sed 's/^/# /' "$TEST_DIR/persist-output"
     failures=1
 fi

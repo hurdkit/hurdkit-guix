@@ -30,6 +30,8 @@ GUIX_OS          ?= guix/hurd64.scm
 GUIX_SSH_PORT    ?= 2223
 # Memory of the guest in MiB.
 GUIX_MEMORY      ?= 2048
+# Virtual CPUs; empty means QEMU's default of one.
+GUIX_CPUS        ?=
 # Extra options for "guix system image", for example --image-size=8G
 GUIX_IMAGE_OPTS  ?=
 # Extra QEMU arguments for guix-start, as a shell word list.
@@ -39,7 +41,7 @@ GUIX_SSH_COMMAND ?=
 
 GUIX_VM = env GUIX_OS="$(abspath $(GUIX_OS))" \
 	GUIX_SSH_PORT=$(GUIX_SSH_PORT) GUIX_MEMORY=$(GUIX_MEMORY) \
-	GUIX_IMAGE_OPTS="$(GUIX_IMAGE_OPTS)" \
+	GUIX_CPUS=$(GUIX_CPUS) GUIX_IMAGE_OPTS="$(GUIX_IMAGE_OPTS)" \
 	bash scripts/guix_vm.sh
 
 .PHONY: guix-image guix-start guix-start-persist guix-status guix-ssh \
@@ -137,14 +139,12 @@ GUIX_VENUS_MEMFD ?= 0
 # QEMU trace event pattern and file, e.g. GUIX_TRACE='virtio_gpu_cmd_*'
 GUIX_TRACE       ?=
 GUIX_TRACE_FILE  ?=
-# Virtual CPUs; empty means QEMU's default of one.
-GUIX_CPUS        ?=
 # Arguments of guix-qmp, e.g. GUIX_QMP_ARGS=status (see scripts/qmp.tcl).
 GUIX_QMP_ARGS    ?=
 
 # scripts/guix_vm.sh reads them from its environment.
 export GUIX_GPU GUIX_DISPLAY GUIX_HOST_GPU GUIX_VK_DEVICE GUIX_VENUS_MEMFD \
-	GUIX_TRACE GUIX_TRACE_FILE GUIX_CPUS
+	GUIX_TRACE GUIX_TRACE_FILE
 
 .PHONY: guix-qmp
 

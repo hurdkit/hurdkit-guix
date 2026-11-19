@@ -11,6 +11,9 @@ export GUIX_DIR="${GUIX_DIR:-$ROOT/img/guix-wayland}"
 export GUIX_SSH_PORT="${GUIX_SSH_PORT:-2227}"
 export GUIX_OS="$ROOT/guix/hurd64-wayland.scm"
 export GUIX_MEMORY="${GUIX_MEMORY:-3072}"
+# The guest boots gnumach-hurdkit-smp; give it as many processors as that
+# kernel is built for.
+export GUIX_CPUS="${GUIX_CPUS:-2}"
 GUIX="${GUIX:-guix}"
 # Frames per client, and the longest a client may take for them in the guest.
 FRAMES="${STAGE2_FRAMES:-60}"

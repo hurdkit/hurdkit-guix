@@ -87,9 +87,6 @@ mapfile -t RESULT < <(options GUIX_GPU=virgl GUIX_DISPLAY=egl-headless GUIX_HOST
 check 'accelerated headless display explicitly enables OpenGL' has_pair -display egl-headless,rendernode=$FAKE_HOST/dri/renderD129,gl=on
 mapfile -t RESULT < <(options GUIX_GPU=2d GUIX_TRACE='virtio_gpu_cmd_*' GUIX_TRACE_FILE=/tmp/a.trace)
 check 'a QMP socket is created beside the monitor socket' has_pair -qmp "unix:${XDG_RUNTIME_DIR:-/tmp}/hurdkit-guix-2223.qmp,server=on,wait=off"
-check 'the CPU count is the QEMU default unless asked for' lacks -smp
-mapfile -t RESULT < <(options GUIX_GPU=none GUIX_CPUS=4)
-check 'GUIX_CPUS sets the number of virtual CPUs' has_pair -smp 4
 check 'source-only helper has no command-line side effects' bash -c "test -z \"\$(bash '$OPTIONS')\""
 check 'invalid GPU mode is rejected' bash -c "source '$OPTIONS'; GUIX_GPU=bogus; ! guix_qemu_options >/dev/null 2>&1"
 check 'invalid display is rejected' bash -c "source '$OPTIONS'; GUIX_GPU=2d GUIX_DISPLAY=bogus; ! guix_qemu_options >/dev/null 2>&1"

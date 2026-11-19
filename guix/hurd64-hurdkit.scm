@@ -7,4 +7,4 @@
              (hurdkit system))
 
 (operating-system-with-hurd (load "hurd64.scm") hurd-hurdkit
-                            #:kernel gnumach-hurdkit)
+                            #:kernel gnumach-hurdkit-smp)

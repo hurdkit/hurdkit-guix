@@ -107,7 +107,6 @@ guix_qemu_options() {
             ;;
         *) guix_qemu_options_die "unknown GUIX_DISPLAY '$display' (use none, egl-headless or gtk)" ; return 1 ;;
     esac
-    [[ -z "${GUIX_CPUS:-}" ]] || GUIX_QEMU_OPTIONS+=(-smp "$GUIX_CPUS")
     GUIX_QEMU_OPTIONS+=(-qmp "unix:$qmp_socket,server=on,wait=off")
     if [[ -n "${GUIX_TRACE:-}" ]]; then
         local trace_file="${GUIX_TRACE_FILE:-$GUIX_DIR/virtio-gpu.trace}"
