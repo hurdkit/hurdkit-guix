@@ -1,5 +1,5 @@
 ;; Linux niri reference for the GNU/Hurd graphics work. Build with the
-;; goonix from nix develop ./nix#guix, not with a pulled Guix.
+;; goonix from nix develop, not with a pulled Guix.
 ;;
 ;;   guix system image --image-type=qcow2 --image-size=8G guix/linux-reference.scm
 

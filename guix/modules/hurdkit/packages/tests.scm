@@ -5,13 +5,15 @@
   #:use-module ((guix licenses) #:prefix license:)
   #:use-module (guix packages)
   #:use-module (guix utils)
-  #:use-module (hurdkit utils))
+  #:use-module ((hurdkit packages virtio) #:select (hurdkit-virtio-matrices)))
 
 (define-public hurdkit-tmpfs-shm
   (package
     (name "hurdkit-tmpfs-shm")
     (version "0.1")
-    (source (local-file (hurdkit-file "tests" "hurd" "tmpfs-shm.c")))
+    ;; The test is tests/hurd/tmpfs-shm.c of the hurdkit repository, in the
+    ;; checkout that (hurdkit packages virtio) pins for the driver matrices.
+    (source (package-source hurdkit-virtio-matrices))
     (build-system gnu-build-system)
     (arguments
      (list
@@ -22,7 +24,7 @@
           (replace 'build
             (lambda _
               (invoke #$(cc-for-target) "-O2" "-Wall" "-Wextra"
-                      "-o" "tmpfs-shm" "tmpfs-shm.c")))
+                      "-o" "tmpfs-shm" "tests/hurd/tmpfs-shm.c")))
           (replace 'install
             (lambda _
               (install-file "tmpfs-shm" (string-append #$output "/bin")))))))

@@ -4,10 +4,10 @@
 ;; package of the Guix that builds the image. That package is built from
 ;; an upstream Guix commit, not from goonix: goonix only adds files. This
 ;; package builds the goonix commit itself, so that the host
-;; (services.guix.package in /etc/nixos), the `nix develop ./nix#guix'
+;; (services.guix.package in /etc/nixos), the `nix develop'
 ;; shell and the guest all run the same Guix.
 ;;
-;; %goonix-commit must be the goonix revision that nix/flake.lock pins;
+;; %goonix-commit must be the goonix revision that flake.lock pins;
 ;; tests/goonix-pin.t checks that. After moving the pin, update the commit
 ;; and the hash here:
 ;;

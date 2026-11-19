@@ -32,7 +32,7 @@
 ;; The same source built for several processors. The number is a
 ;; compile-time upper bound; Hurdkit's own harness builds and boots this
 ;; kernel with as many processors as the bound, and so do our guests
-;; (GUIX_CPUS in guix.mk). Tickless idle (--enable-tickless) is a
+;; (GUIX_CPUS in the Makefile). Tickless idle (--enable-tickless) is a
 ;; uniprocessor option of the same source and is left off.
 (define %gnumach-smp-cpus 2)
 

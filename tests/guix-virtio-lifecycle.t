@@ -94,7 +94,7 @@ check 'it builds the image, boots and stops the guest' \
     bash -c 'grep -qx image "$1" && grep -q "^start -- " "$1" && grep -qx stop "$1"' _ "$TEST_DIR/calls"
 check 'the guest gets the 9p device and its trace events' \
     bash -c 'grep "^start -- " "$1" | grep -q -- "-trace enable=v9fs_walk .*-D .*virtio-9p-pci,fsdev=virtfs0"' _ "$TEST_DIR/calls"
-check 'the matrix is the pinned one, not a script of the working tree' \
+check 'the matrix runs from the pinned package' \
     matrix_has "directory=$MATRICES"
 check 'the matrix gets the Guix-built driver binaries' \
     bash -c 'grep -qx "VIRTIO_9P_BIN=$1/store/virtio/bin/virtio-9p" "$1/matrix" && grep -qx "P9FS_BIN=$1/store/9pfs/bin/9pfs" "$1/matrix"' _ "$TEST_DIR"

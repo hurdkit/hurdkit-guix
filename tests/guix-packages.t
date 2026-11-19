@@ -7,7 +7,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 GUIX="${GUIX:-guix}"
 if ! "$GUIX" --version 2>/dev/null | head -n 1 | grep -q goonix; then
-    echo '1..0 # SKIP needs goonix (nix develop ./nix#guix)'
+    echo '1..0 # SKIP needs goonix (nix develop)'
     exit 0
 fi
 export GUILE_AUTO_COMPILE=0

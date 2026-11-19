@@ -1,0 +1,5 @@
+img/
+.direnv/
+result
+result-*
+__pycache__/

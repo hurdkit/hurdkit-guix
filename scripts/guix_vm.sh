@@ -22,7 +22,7 @@
 # The base image is never booted: the guest always runs from a
 # copy-on-write overlay, so the base image stays as Guix built it.
 #
-# Every setting below can be overridden from the environment; guix.mk
+# Every setting below can be overridden from the environment; the Makefile
 # passes some of them.
 
 set -euo pipefail
@@ -84,7 +84,7 @@ need() {
     command -v "$1" >/dev/null 2>&1 || die "$1 is required but not in PATH"
 }
 
-# The image has to be built by goonix, the Guix that nix/flake.lock pins:
+# The image has to be built by goonix, the Guix that flake.lock pins:
 # another Guix (for example an upstream one installed with "guix pull")
 # evaluates a different package graph, and the image is then not the one
 # this repository declares. GUIX_ANY_VERSION=1 skips the check.
@@ -92,7 +92,7 @@ require_goonix() {
     local version
     version="$("$GUIX" --version 2>/dev/null | head -n 1)"
     [[ "${GUIX_ANY_VERSION:-0}" == 1 || "$version" == *goonix* ]] || \
-        die "$GUIX is not goonix ($version); run this inside nix develop ./nix#guix"
+        die "$GUIX is not goonix ($version); run this inside nix develop"
 }
 
 # The process ID of the running QEMU, or nothing.
@@ -199,8 +199,8 @@ new_overlay() {
     "$QEMU_IMG" create -q -f qcow2 -b "$(readlink -f "$BASE_IMG")" -F qcow2 "$overlay"
 }
 
-# The SSH keys of the accounts live in img/keys, which the Debian guest
-# shares. Whichever side runs first creates them; existing keys are kept.
+# The SSH keys of the accounts live in img/keys. Missing ones are created;
+# existing keys are kept.
 ensure_keys() {
     local account key
     mkdir -p "$SSH_KEY_DIR"

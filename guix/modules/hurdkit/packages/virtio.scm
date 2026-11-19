@@ -1,6 +1,6 @@
 ;;; The drivers under test in the Guix Hurd guest, their test matrices, and
-;;; what those expect from a guest. Everything here is pinned: the scripts of
-;;; the working tree are not used, so changing them cannot break these tests.
+;;; what those expect from a guest. Everything here is pinned, so a change in
+;;; the repositories it comes from cannot break these tests.
 (define-module (hurdkit packages virtio)
   #:use-module (guix build-system copy)
   #:use-module (guix build-system gnu)
@@ -162,6 +162,8 @@ by a 9P2000.L server, such as QEMU's virtio-9p device.")
 ;; scripts/guix_virtio_test.sh runs this snapshot against the
 ;; drivers pinned above. To move to newer matrices, change the commit and
 ;; the hash here, then adapt guix_virtio_test.sh to what they expect.
+;; (hurdkit packages tests) builds Hurdkit's test programs from the same
+;; checkout.
 (define %matrices-commit "c3ef87d57d2bc6320168f4471b234c63b72a7317")
 
 (define-public hurdkit-virtio-matrices

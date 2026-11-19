@@ -2,16 +2,16 @@
 
 ## Trigger
 
-Use this skill for work on the Guix guest (`guix/`, `guix.mk`,
+Use this skill for work on the Guix guest (`guix/`, `Makefile`,
 `scripts/guix_*.sh`), or when a Guix guest does not boot or answer.
 
 ## Inputs
 
-- `nix/flake.nix` and `nix/flake.lock`: the `guix` development shell, with
-  goonix (our fork of GNU Guix) at a pinned commit.
+- `flake.nix` and `flake.lock`: the development shell, with goonix (our
+  fork of GNU Guix) at a pinned commit.
 - `guix/hurd64.scm`: the system declaration of the guest.
 - `guix/goonix.scm`: goonix as the guest's own Guix (same commit as the lock).
-- `guix.mk`: the make targets of the guest.
+- `Makefile`: the make targets of the guests.
 - `scripts/guix_vm.sh`: builds, boots and manages the guest.
 - `img/guix/`: the base image, overlays and logs of the guest.
 - `img/keys/`: the SSH keys of the guest's root and peon accounts.
@@ -23,15 +23,18 @@ with key-based SSH.
 
 ## Constraints
 
-- The Guix guest and the Debian pipeline do not depend on each other.
-  Nothing of the guest reads a variable of the Makefile or runs a script of
-  the Debian pipeline (`tests/guix-standalone.t` checks that), and the
-  Debian pipeline uses nothing of the guest: the Makefile only includes
-  `guix.mk`. The two share `img/keys/`.
-- Whatever the guest needs from another repository, or from this one's
-  other half, is a Guix package or origin at a pinned commit with its hash.
-  A pin moves only when someone moves it, so a change elsewhere cannot
-  break a Guix target.
+- This repository stands alone. Nothing in it reads a file of a checkout
+  of Hurdkit or of any other repository (`tests/guix-standalone.t` checks
+  what a test can check of that).
+- Whatever the guests need from another repository (GNU Mach, the Hurd,
+  the drivers and their test matrices, test programs that live in Hurdkit)
+  is a Guix package or origin at a pinned commit with its hash. A pin moves
+  only when someone moves it, so a change elsewhere cannot break a target
+  here.
+- Scheme, and what serves only these guests, belongs here. A fix to the
+  source of GNU Mach, the Hurd or a driver goes to that source's repository
+  as a pull request, and the pin moves here once it is merged. A test that
+  does not need Guix goes to Hurdkit and is pinned here.
 - This document states no counts, durations, versions or test results. A
   pin or a default that moves must not make it wrong: name the variable or
   the command that tells instead.
@@ -43,14 +46,14 @@ with key-based SSH.
 
 ### Build the image
 
-Host, shell and guest all run goonix at the commit that `nix/flake.lock`
+Host, shell and guest all run goonix at the commit that `flake.lock`
 pins: the host's daemon (see "Host daemon"), the `guix` command of the
-`nix develop ./nix#guix` shell, and the guest's Guix through
+`nix develop` shell, and the guest's Guix through
 `guix/goonix.scm`. Run every Guix command in that shell and never run
 `guix pull` for this work.
 
 ```sh
-nix develop ./nix#guix
+nix develop
 guix system image --image-type=hurd64-qcow2 guix/hurd64.scm
 ```
 
@@ -76,7 +79,7 @@ The guest's `guix --version` prints the same goonix line as on the host.
 
 The host's Guix daemon has to be goonix too. On NixOS, with goonix as an
 input of the system flake (`goonix.url = "github:hurdkit/goonix/goonix";`,
-locked at the commit `nix/flake.lock` pins; goonix's `main` branch mirrors
+locked at the commit `flake.lock` pins; goonix's `main` branch mirrors
 upstream Guix, its `goonix` branch has the fork):
 
 ```nix
@@ -90,9 +93,9 @@ guix-daemon.socket`. If the service restarted before its socket ("Socket
 service guix-daemon.service already active, refusing"), run `systemctl stop
 guix-daemon.service` and `systemctl start guix-daemon.socket`.
 
-To move the goonix pin, update `nix/flake.lock` (`nix flake update goonix
---flake ./nix`), the system flake's lock, and `%goonix-commit` with its
-hash in `guix/goonix.scm`; `tests/goonix-pin.t` compares the last two.
+To move the goonix pin, update `flake.lock` (`nix flake update goonix`),
+the system flake's lock, and `%goonix-commit` with its hash in
+`guix/goonix.scm`; `tests/goonix-pin.t` compares the last two.
 
 ### Host archive signing
 
@@ -124,7 +127,7 @@ a boot does not answer in time (G15). `make guix-status` says whether the
 guest runs and answers. `make guix-stop` sends `halt` over SSH, waits for
 GNU Mach's shutdown marker in the serial log, then stops QEMU, because a
 Hurd halt does not power the machine off (G16). A forced stop without that
-marker returns failure. The variables at the top of `guix.mk` and of
+marker returns failure. The variables at the top of `Makefile` and of
 `scripts/guix_vm.sh` say what can be set, with their defaults.
 
 ### Rebuild and persistent state
@@ -181,12 +184,13 @@ guest, `ps -ef` shows every translator from the one Hurd.
 `img/guix-platform/`, boots it on its own port and runs the platform's test
 programs in it; `scripts/stage1_check.sh` lists them. The guest has:
 
-- `tmpfs-shm DIRECTORY` (`tests/hurd/tmpfs-shm.c`), the shared memory
-  test. When the last reference to an unlinked file goes away, the tmpfs
-  of `hurd-hurdkit` does not shrink the file's memory object to zero, so
-  its mappings keep working. The test checks that on `/dev/shm`, and on
-  ext2 as the control; it also runs on Linux. Its truncation and `msync`
-  cases need `gnumach-hurdkit` (G22).
+- `tmpfs-shm DIRECTORY`, the shared memory test. Its source is
+  `tests/hurd/tmpfs-shm.c` of Hurdkit, built from the checkout that
+  `(hurdkit packages virtio)` pins. When the last reference to an unlinked
+  file goes away, the tmpfs of `hurd-hurdkit` does not shrink the file's
+  memory object to zero, so its mappings keep working. The test checks
+  that on `/dev/shm`, and on ext2 as the control; it also runs on Linux.
+  Its truncation and `msync` cases need `gnumach-hurdkit` (G22).
 - `hurd-epoll-shim`, the epoll, eventfd, timerfd and signalfd library for
   the libwayland port, with its TAP suites (`hurd-epoll-shim-test-NAME`).
   It lives in its own repository, github.com/hurdkit/hurd-epoll-shim, and
@@ -248,10 +252,10 @@ Each target runs one test matrix of Hurdkit's virtio drivers against a
 separate, disposable guest (`guix/hurd64-drivers.scm`, `img/guix-drivers/`).
 Drivers and matrices are Guix packages of `(hurdkit packages virtio)` at
 pinned commits: `scripts/guix_virtio_test.sh` runs that snapshot of the
-matrices and never the scripts of the working tree, so work on those cannot
-break these targets. To test newer drivers or matrices, move the pins in
-the module and adapt `guix_virtio_test.sh` to what the new matrices expect;
-`VIRTIO_SRC=DIR` and `VIRTIO_MATRICES=DIR` try a local checkout first.
+matrices, so work on them in Hurdkit cannot break these targets. To test
+newer drivers or matrices, move the pins in the module and adapt
+`guix_virtio_test.sh` to what the new matrices expect; `VIRTIO_SRC=DIR` and
+`VIRTIO_MATRICES=DIR` try a local checkout first.
 
 After a passing matrix the guest has to shut down cleanly. A failed matrix
 leaves the guest running and prints how to reach it; `REUSE=1` runs the
@@ -337,7 +341,7 @@ stores only the blocks that differ from the base. On a new base it
 describes a disk that no longer exists and the guest sees a corrupt
 filesystem. Copy what you need out with `scp`, then `make guix-reset-state`.
 
-**G9. Nix only sees files that git knows.** After editing `nix/flake.nix`,
+**G9. Nix only sees files that git knows.** After editing `flake.nix`,
 `git add` it before `nix develop`. (Guix reads `guix/` from the working
 directory, so this does not apply there.)
 
@@ -407,7 +411,7 @@ builds serially.
 
 ## Verification
 
-Run these in `nix develop ./nix#guix`. Each command exits with zero status
+Run these in `nix develop`. Each command exits with zero status
 when its checks pass and prints what failed otherwise.
 
 | Check | Command |

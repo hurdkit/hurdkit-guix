@@ -4,9 +4,8 @@
 # Usage: guix_virtio_test.sh 9p|balloon|blk|net
 #
 # Drivers and matrices are Guix packages at pinned commits, see
-# (hurdkit packages virtio): this script never runs the scripts of the
-# working tree, and what it passes to a matrix is what the pinned one
-# expects. It boots guix/hurd64-drivers.scm with the device and its QEMU
+# (hurdkit packages virtio): what this script passes to a matrix is what
+# the pinned one expects. It boots guix/hurd64-drivers.scm with the device and its QEMU
 # trace events, builds the driver binaries, and hands both to the matrix.
 #
 # Environment:

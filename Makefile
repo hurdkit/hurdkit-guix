@@ -1,12 +1,15 @@
-# Guix GNU/Hurd (x86_64-gnu) guest. Included by the top-level Makefile.
+# Guix GNU/Hurd (x86_64-gnu) guests.
 #
-# The system is declared in guix/hurd64.scm. Run these targets inside
-# "nix develop ./nix#guix": the guix command has to be the pinned goonix.
+# The plain guest is declared in guix/hurd64.scm. Run these targets inside
+# "nix develop": the guix command has to be the pinned goonix.
 # See skills/GUIX.md.
-#
-# This file reads no variable of the Makefile that includes it, and runs
-# none of the Debian pipeline's scripts. Its own variables start with
-# GUIX_ or LINUX_REF_, so that nothing collides either.
+
+.DEFAULT_GOAL := help
+.PHONY: help
+
+# Print the names of the targets.
+help:
+	@sed -n 's/^\([a-z][a-z0-9-]*\):.*/\1/p' Makefile
 
 # The command that runs guix-authorize-host as root.
 GUIX_SUDO        ?= sudo
@@ -107,9 +110,8 @@ stage2-reference:
 
 # --- Driver tests in a separate, disposable guest (guix/hurd64-drivers.scm,
 # img/guix-drivers/). The drivers and the test matrices are Guix packages
-# at pinned commits ((hurdkit packages virtio)); the scripts of the working
-# tree are not used. REUSE=1 reruns a matrix on the guest that a failed run
-# left running. ---
+# at pinned commits ((hurdkit packages virtio)). REUSE=1 reruns a matrix on
+# the guest that a failed run left running. ---
 
 .PHONY: guix-virtio-test guix-virtio-balloon-test guix-virtio-blk-test \
 	guix-virtio-net-test
