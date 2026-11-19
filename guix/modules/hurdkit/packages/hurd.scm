@@ -10,8 +10,8 @@
 ;; Both come from the "hurdkit" branch of Hurdkit's copy of the project.
 ;; Guix needs fixed commits and hashes: these two are pins of this module
 ;; alone, moved forward by hand (commit and base32 hash together).
-(define %gnumach-hurdkit-commit "9c3018f69bef53dc19c51c32cdfbfe4dff4f634a")
-(define %hurd-hurdkit-commit "68ea24a2276b89c8cb063c8207ffbcbf2472efaa")
+(define %gnumach-hurdkit-commit "7944a9441802c2e84493f76d0857e9b7dca9c266")
+(define %hurd-hurdkit-commit "7825c3404008b1ed22fc72fa9a85e25d4bb75ee0")
 
 (define-public gnumach-hurdkit
   (package
@@ -26,7 +26,7 @@
              (commit %gnumach-hurdkit-commit)))
        (file-name (git-file-name "gnumach-hurdkit" version))
        (sha256
-        (base32 "11vca502m4ciz8zvx6063f20azh5x41nawk9d6125jzifmgazkc1"))))
+        (base32 "1g1i2vi4s29nq19r0npn8vhfb2a44ziwamrsk4szlvvn195y619n"))))
     (synopsis "GNU Mach from Hurdkit's branch, at a pinned commit")))
 
 ;; The Hurd servers and libraries. The two local patches adapt this newer
@@ -45,7 +45,7 @@
              (commit %hurd-hurdkit-commit)))
        (file-name (git-file-name "hurd-hurdkit" version))
        (sha256
-        (base32 "1ia5ngfigxi5y26q9nw34jn3aqwgmdgm1kwqx5b9vp5ln89rbfvi"))
+        (base32 "18ya79wqghfcrqdkyh83bxfgz826a8nbm321z0fn98gv1d1i8naw"))
        (patches
         (append (search-patches "hurd-refcounts-assert.patch")
                 (map hurdkit-patch
