@@ -4,21 +4,8 @@
 ;;   guix system image --image-type=qcow2 --image-size=8G guix/linux-reference.scm
 
 (use-modules (gnu) (gnu system image))
-(unless (resolve-module '(hurdkit guest-keys) #:ensure #f)
-  (save-module-excursion
-   (lambda ()
-     (load (string-append (dirname (current-filename))
-                          "/modules/hurdkit/guest-keys.scm")))))
-(use-modules (hurdkit guest-keys))
 (use-service-modules base desktop networking ssh)
 (use-package-modules admin bash gl terminals vulkan window-management)
-
-(define root-key
-  (or (guest-root-public-key)
-      (local-file "../img/keys/root_ed25519.pub")))
-(define peon-key
-  (or (guest-peon-public-key)
-      (local-file "../img/keys/peon_ed25519.pub")))
 
 ;; Vulkan applications use Mesa's ICD manifest directly. The loader's
 ;; XDG_DATA_DIRS path is not sufficient for this system profile.
@@ -122,8 +109,8 @@
               (permit-root-login 'prohibit-password)
               (password-authentication? #f)
               (authorized-keys
-               `(("root" ,root-key)
-                 ("peon" ,peon-key))))))
+               `(("root" ,(local-file "../img/keys/root_ed25519.pub"))
+                 ("peon" ,(local-file "../img/keys/peon_ed25519.pub")))))))
    (modify-services %base-services
      (delete mingetty-service-type)
      (console-font-service-type config =>
