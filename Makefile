@@ -27,8 +27,13 @@ guix-test:
 
 # --- The guest: scripts/guix_vm.sh builds, boots and manages it. ---
 
-# The system declaration that guix-image builds.
+# The system declaration that guix-image builds, or a flake reference.
 GUIX_OS          ?= guix/hurd64.scm
+ifneq ($(findstring #,$(GUIX_OS)),)
+GUIX_OS_SOURCE   := $(GUIX_OS)
+else
+GUIX_OS_SOURCE   := $(abspath $(GUIX_OS))
+endif
 # The port on the host that is forwarded to the sshd of the guest.
 GUIX_SSH_PORT    ?= 2223
 # Memory of the guest in MiB.
@@ -42,7 +47,7 @@ GUIX_QEMU_ARGS   ?=
 # One remote command for guix-ssh; pipe a script into it for more.
 GUIX_SSH_COMMAND ?=
 
-GUIX_VM = env GUIX_OS="$(abspath $(GUIX_OS))" \
+GUIX_VM = env GUIX_OS="$(GUIX_OS_SOURCE)" \
 	GUIX_SSH_PORT=$(GUIX_SSH_PORT) GUIX_MEMORY=$(GUIX_MEMORY) \
 	GUIX_CPUS=$(GUIX_CPUS) GUIX_IMAGE_OPTS="$(GUIX_IMAGE_OPTS)" \
 	bash scripts/guix_vm.sh

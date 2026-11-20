@@ -220,7 +220,12 @@ ensure_keys() {
 cmd_image() {
     need "$GUIX"; need "$QEMU_IMG"; need flock
     require_goonix
-    [[ -f "$GUIX_OS" ]] || die "system declaration not found: $GUIX_OS"
+    local flake_reference=
+    if [[ "$GUIX_OS" == *#* ]]; then
+        flake_reference=yes
+    else
+        [[ -f "$GUIX_OS" ]] || die "system declaration not found: $GUIX_OS"
+    fi
     ensure_keys
     [[ -z "$(qemu_pid)" ]] || die "the guest is running; stop it first (make guix-stop)"
     if [[ -e "$STATE_IMG" ]]; then
@@ -246,9 +251,15 @@ would be corrupt on top of a new one. Remove it first: make guix-reset-state"
     # guix prints the store file name of the image as the last line of its
     # standard output; the build log goes to standard error.
     # shellcheck disable=SC2086
-    store_image="$("$GUIX" system image --load-path="$REPO_ROOT/guix/modules" \
-        --image-type="$GUIX_IMAGE_TYPE" \
-        $GUIX_IMAGE_OPTS --root="$STORE_LINK" "$GUIX_OS" | tail -n 1)"
+    if [[ -n "$flake_reference" ]]; then
+        store_image="$("$GUIX" system image \
+            --image-type="$GUIX_IMAGE_TYPE" \
+            $GUIX_IMAGE_OPTS --root="$STORE_LINK" "$GUIX_OS" | tail -n 1)"
+    else
+        store_image="$("$GUIX" system image --load-path="$REPO_ROOT/guix/modules" \
+            --image-type="$GUIX_IMAGE_TYPE" \
+            $GUIX_IMAGE_OPTS --root="$STORE_LINK" "$GUIX_OS" | tail -n 1)"
+    fi
     [[ -f "$store_image" ]] || die "guix did not produce an image (got: '$store_image')"
     echo "guix_vm: built $store_image"
     if [[ -f "$BASE_IMG" && "$store_image" == "$previous" ]]; then
