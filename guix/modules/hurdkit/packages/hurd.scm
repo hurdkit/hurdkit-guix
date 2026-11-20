@@ -11,7 +11,7 @@
 ;; Guix needs fixed commits and hashes: these two are pins of this module
 ;; alone, moved forward by hand (commit and base32 hash together).
 (define %gnumach-hurdkit-commit "7944a9441802c2e84493f76d0857e9b7dca9c266")
-(define %hurd-hurdkit-commit "7825c3404008b1ed22fc72fa9a85e25d4bb75ee0")
+(define %hurd-hurdkit-commit "9e03b5bd5c0a86cb12e148624240c5e36b04dbc0")
 
 (define-public gnumach-hurdkit
   (package
@@ -64,7 +64,7 @@
              (commit %hurd-hurdkit-commit)))
        (file-name (git-file-name "hurd-hurdkit" version))
        (sha256
-        (base32 "18ya79wqghfcrqdkyh83bxfgz826a8nbm321z0fn98gv1d1i8naw"))
+        (base32 "1vij10s37x85qpr84kalrjg3jkbp06dmq2pacpg2xxwghrncrhvp"))
        (patches
         (append (search-patches "hurd-refcounts-assert.patch")
                 (map hurdkit-patch
