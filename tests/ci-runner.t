@@ -50,6 +50,12 @@ for command in udevadm groupadd useradd; do
 echo "$(basename "$0") $*" >> "$TEST_DIR/calls"
 SH
 done
+# A sudo that records the privileged calls and runs them as the caller.
+stub sudo <<'SH'
+#!/usr/bin/env bash
+echo "sudo $*" >> "$TEST_DIR/calls"
+exec "$@"
+SH
 stub getent <<'SH'
 #!/usr/bin/env bash
 exit 2
@@ -116,6 +122,21 @@ if [[ "$output" == *"CI_WORK=$root/var/lib/hurdkit-ci"* && ! -e "$root/usr/share
     ok 'without a second disk, / makes room and takes it'
 else
     not_ok 'without a second disk, / makes room and takes it' "$output"
+fi
+# disk makes the work directory as root, and the later steps run as the
+# runner's user: they write the saved store to cache and the images to
+# release, so disk hands those two to that user.
+fresh_root
+output="$(runner SUDO=sudo FAKE_MNT_MOUNTED=1 FAKE_ROOT_FREE=40 bash "$REPO_ROOT/scripts/ci_runner.sh" disk 2>&1)"
+work="$root/var/lib/hurdkit-ci"
+owner="$(id -u):$(id -g)"
+if [[ -d "$work/release" ]] &&
+        grep -Eq "^sudo chown $owner( .*)? $work/cache( |\$)" "$TEST_DIR/calls" &&
+        grep -Eq "^sudo chown $owner( .*)? $work/release( |\$)" "$TEST_DIR/calls"; then
+    ok 'the saved store and the images go to directories of the runner'
+else
+    not_ok 'the saved store and the images go to directories of the runner' \
+        "$output"$'\n'"$(cat "$TEST_DIR/calls" 2>/dev/null)"
 fi
 fresh_root
 if output="$(runner FAKE_MNT_MOUNTED=1 FAKE_ROOT_FREE=10 bash "$REPO_ROOT/scripts/ci_runner.sh" disk 2>&1)"; then
