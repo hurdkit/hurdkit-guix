@@ -285,12 +285,17 @@ workstation:
 - `make guix-virtio-test`, `guix-virtio-balloon-test`,
   `guix-virtio-blk-test` and `guix-virtio-net-test`.
 
-It runs for pull requests and pushes to `main` that touch the flake, the
-`Makefile`, `guix/`, `scripts/`, `tests/` or these workflows, by hand, and
-on the schedule in the workflow, for the same reasons as `images.yml`.
+It runs for every pull request, for pushes to `main` that touch the
+flake, the `Makefile`, `guix/`, `scripts/`, `tests/` or these workflows
+(the path filter of its push trigger), by hand, and on the schedule in the
+workflow, for the same reasons as `images.yml`.
 
-1. Job `goonix`, as for the images.
-2. Job `store`, not for pull requests: the newest saved store of the test
+1. Job `changes` decides whether the guests are to be checked: for a pull
+   request, when a file that it changes against its base matches the path
+   filter of the push trigger (`scripts/ci_guests.sh touches`); for the
+   other events, always. The jobs that follow run only then.
+2. Job `goonix`, as for the images.
+3. Job `store`, not for pull requests: the newest saved store of the test
    guests comes from the Actions cache (the store of `images.yml` the first
    time), `guix_vm.sh keys` makes the accounts' keys that the declarations
    read, and `guix_release.sh prefetch` with the declarations of the test
@@ -300,12 +305,23 @@ on the schedule in the workflow, for the same reasons as `images.yml`.
    (the driver matrices, the programs that render `stage2-check`'s
    reference) is built too. The store is saved when it changed, also after
    a failure or a timeout.
-3. Job `check`, one per check: the runner as for the images, but it fails
+4. Job `check`, one per check: the runner as for the images, but it fails
    without a usable `/dev/kvm` (`ci_runner.sh kvm --require`); the store
    that `store` saved; `prefetch` for the check's guest; then the check.
    A failed check keeps the serial logs, QEMU traces and frames of its
    guests as an artifact of the run; never `img/keys/`, whose keys are
    made on the runner and go with it.
+5. Job `guests` runs last, whatever happened before it
+   (`scripts/ci_guests.sh verdict`): it fails when a job failed, was
+   cancelled, or did not run although the guests are touched, and passes
+   when every job passed or none had to run.
+
+Branch protection requires two checks: `guests`, this last job, and
+`test`, the job of `test.yml`, which has no path filter. It must not
+require the checks of the matrix by their names: when the pull request
+does not touch the guests, the matrix is skipped and GitHub reports one
+check under the unexpanded name of the job, so a required check named
+after one of them would wait forever.
 
 A pull request saves no store: its checks start from the store of `main`
 and each builds what the pull request changes. The caches of pull requests

@@ -1,7 +1,9 @@
 # The TAP tests of the scripts (make guix-test) and shellcheck of the
-# scripts that CI runs, for pull requests and pushes to main. Nothing is
+# scripts that CI runs, for every pull request and push to main. Nothing is
 # built and no guest is booted; the tests that need goonix skip here, and
-# guests.yml runs them with goonix.
+# guests.yml runs them with goonix. Without a path filter, the check of the
+# job test reports on every pull request, so branch protection can require
+# it.
 name: test
 
 on:
@@ -27,4 +29,4 @@ jobs:
       - name: make guix-test
         run: make guix-test
       - name: shellcheck
-        run: shellcheck scripts/ci_runner.sh scripts/guix_release.sh scripts/guix_virtio_test.sh scripts/stage0_check.sh scripts/stage1_check.sh
+        run: shellcheck scripts/ci_guests.sh scripts/ci_runner.sh scripts/guix_release.sh scripts/guix_virtio_test.sh scripts/stage0_check.sh scripts/stage1_check.sh

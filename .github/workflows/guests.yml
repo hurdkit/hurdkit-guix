@@ -11,21 +11,18 @@
 # - the Linux reference half of stage0-check (STAGE0_GPUS): it renders
 #   through virgl and Venus on an AMD or NVIDIA GPU of the host, and the
 #   hosted runners have no GPU. The Hurd half runs, with STAGE0_GPUS empty.
+#
+# Branch protection requires the last job, guests, and none of the others:
+# see there.
 name: guests
 
 on:
-  # Pull requests and pushes to main that touch the guests, the scripts
-  # that build and test them, or their tests.
+  # Every pull request, so that the required check always reports. The job
+  # changes decides whether one touches the guests: the paths of the push
+  # trigger below, which are written only there.
   pull_request:
-    paths:
-      - flake.nix
-      - flake.lock
-      - Makefile
-      - guix/**
-      - scripts/**
-      - tests/**
-      - .github/workflows/guests.yml
-      - .github/workflows/goonix.yml
+  # Pushes to main that touch the guests, the scripts that build and test
+  # them, or their tests.
   push:
     branches: [main]
     paths:
@@ -58,7 +55,38 @@ env:
   GUEST_SYSTEMS: guix/hurd64.scm guix/hurd64-platform.scm guix/hurd64-drivers.scm guix/hurd64-wayland.scm
 
 jobs:
+  # Whether the guests have to be checked: for a pull request, when a file
+  # it changes matches a path of the push trigger
+  # (scripts/ci_guests.sh touches); otherwise always, since pushes to main
+  # are filtered already.
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      guests: ${{ steps.touches.outputs.guests }}
+    steps:
+      # The whole history, so that the base of a pull request is in it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Does it touch the guests?
+        id: touches
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ "$EVENT" == pull_request ]]; then
+            guests="$(bash scripts/ci_guests.sh touches "$BASE")"
+          else
+            guests=true
+          fi
+          echo "guests: $guests"
+          echo "guests=$guests" >> "$GITHUB_OUTPUT"
+
   goonix:
+    needs: changes
+    if: needs.changes.outputs.guests == 'true'
     uses: ./.github/workflows/goonix.yml
 
   # Everything the test guests need but their images, built from the
@@ -68,8 +96,8 @@ jobs:
   # and their caches would push those of main out of the repository's
   # cache space.
   store:
-    needs: goonix
-    if: github.event_name != 'pull_request'
+    needs: [changes, goonix]
+    if: needs.changes.outputs.guests == 'true' && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 355
     steps:
@@ -144,9 +172,10 @@ jobs:
   # missing, and runs the check as make runs it on a workstation.
   check:
     name: ${{ matrix.check }}
-    needs: [goonix, store]
+    needs: [changes, goonix, store]
     if: >-
-      !cancelled() && needs.goonix.result == 'success' &&
+      !cancelled() && needs.changes.outputs.guests == 'true' &&
+      needs.goonix.result == 'success' &&
       (needs.store.result == 'success' || needs.store.result == 'skipped')
     runs-on: ubuntu-24.04
     timeout-minutes: 355
@@ -266,3 +295,31 @@ jobs:
             img/stage0
           if-no-files-found: ignore
           retention-days: 7
+
+  # The check that branch protection requires, under this job's name,
+  # guests. It reports on every pull request: it passes when the jobs above
+  # passed, or were skipped because the pull request does not touch the
+  # guests, and fails when one of them failed, was cancelled, or did not
+  # run although the guests are touched (scripts/ci_guests.sh verdict).
+  # The checks of the matrix are not to be required by their names: when
+  # the matrix is skipped, GitHub reports one check under the unexpanded
+  # name of the job, and a required check of another name would wait
+  # forever.
+  guests:
+    needs: [changes, goonix, store, check]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verdict
+        env:
+          EVENT: ${{ github.event_name }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          GUESTS: ${{ needs.changes.outputs.guests }}
+          GOONIX_RESULT: ${{ needs.goonix.result }}
+          STORE_RESULT: ${{ needs.store.result }}
+          CHECK_RESULT: ${{ needs.check.result }}
+        run: bash scripts/ci_guests.sh verdict
