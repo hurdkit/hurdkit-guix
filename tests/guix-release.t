@@ -62,11 +62,22 @@ expect 'a package of guix/modules is our own' own "$(release classify "$d_own")"
 expect 'goonix is our own' own "$(release classify "$d_goonix")"
 expect 'the source of our own package is our own' own "$(release classify "$d_checkout")"
 expect 'any other package is foreign' foreign "$(release classify "$d_foreign")"
+# The test guests also need packages of guix/modules that are not
+# exported, sources with our patches, and checkouts of other repositories.
+d_unexported="$(drv 20 rust-sysroot-hurd-1.98.1 '')"
+d_patched="$(drv 21 mesa-26.2.6.tar.zst '')"
+d_download="$store/$(hash 22)-9pfs-0-1.b5b23de-checkout.drv"
+printf 'Derive([("out","/gnu/store/%s-9pfs-0-1.b5b23de-checkout","r:sha256","%064d")],[],[],"x86_64-linux","builtin:git-download",[],[])' \
+    "$(hash 22)" 0 > "$d_download"
+expect 'a package that guix/modules names but does not export is our own' own \
+    "$(release classify "$d_unexported")"
 d_digit="$(drv 23 hurd-9pfs-0-1.b5b23de '')"
 expect 'a package of ours with a dash and a digit in its name is our own' own \
     "$(release classify "$d_digit")"
 d_prefix="$(drv 24 hurd-0.9.git20251029-0.6290b4c '')"
 expect 'a package whose name is a part of ours is foreign' foreign "$(release classify "$d_prefix")"
+expect 'a source archive with patches applied is a source' source "$(release classify "$d_patched")"
+expect 'a download is a source' source "$(release classify "$d_download")"
 
 dry_run="substitute: looking for substitutes on 'https://bordeaux.guix.gnu.org'...  50.0%"$'\r'"substitute: done
 The following derivations would be built:
@@ -122,6 +133,17 @@ elif grep -q 'G2' "$TEST_DIR/gate.err" && grep -q "$(basename "$d_foreign")" "$T
     ok 'a foreign package that no farm offers stops the gate, naming it and G2'
 else
     not_ok 'the gate names the package and G2' "$(cat "$TEST_DIR/gate.err")"
+fi
+output="$(gate "$d_graft $d_own $d_patched $d_download" "$d_own $d_patched $d_download")"
+rc=$?
+expect 'sources and our own packages pass the gate, with substitutes' "0 " "$rc $output"
+# check takes the declarations of the test guests in place of the released ones.
+output="$(PLAN_LOCAL="$d_graft" PLAN_SUBSTITUTES="" release cmd_check guix/hurd64-platform.scm 2>&1)"
+if [[ "$output" == *"guix/hurd64-platform.scm: the store has every package"* &&
+        "$output" != *release.scm* ]]; then
+    ok 'check gates the declarations it is given, and only those'
+else
+    not_ok 'check gates the declarations it is given, and only those' "$output"
 fi
 if FAKE_VERSION=1.5.0 release require_goonix 2>/dev/null; then
     not_ok 'a guix that is not goonix is refused (G1)'
