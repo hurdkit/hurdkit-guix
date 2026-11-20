@@ -36,13 +36,18 @@ for package in "${packages[@]}"; do
     check "package $package evaluates" \
         "$GUIX" build -L guix/modules --target=x86_64-pc-gnu -n "$package"
 done
-# The declarations read the accounts' public keys from img/keys, which
-# make guix-image creates.
+# Most declarations read the accounts' public keys from img/keys, which
+# make guix-image creates; the released ones and their base do not, and
+# are evaluated without them.
 skip_systems=
 [[ -f img/keys/root_ed25519.pub && -f img/keys/peon_ed25519.pub ]] ||
     skip_systems="no img/keys yet (make guix-image creates them)"
+reads_keys() {
+    [[ "$1" == guix/hurd64.scm ]] ||
+        grep -q -e 'img/keys' -e '(load "hurd64.scm")' < <(sed 's/;.*//' "$1")
+}
 for system in "${systems[@]}"; do
-    if [[ -n "$skip_systems" ]]; then
+    if [[ -n "$skip_systems" ]] && reads_keys "$system"; then
         number=$((number + 1))
         echo "ok $number - system $system evaluates # SKIP $skip_systems"
         continue

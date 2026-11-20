@@ -9,10 +9,15 @@ Use this skill for work on the Guix guest (`guix/`, `Makefile`,
 
 - `flake.nix` and `flake.lock`: the development shell, with goonix (our
   fork of GNU Guix) at a pinned commit.
-- `guix/hurd64.scm`: the system declaration of the guest.
+- `guix/hurd64.scm`: the system declaration of the guest, which is
+  `guix/hurd64-base.scm` with key-based SSH.
+- `guix/hurd64-release.scm`, `guix/hurd64-hurdkit-release.scm`: the
+  released images (see "Release images").
 - `guix/goonix.scm`: goonix as the guest's own Guix (same commit as the lock).
 - `Makefile`: the make targets of the guests.
 - `scripts/guix_vm.sh`: builds, boots and manages the guest.
+- `scripts/guix_release.sh`, `scripts/ci_runner.sh`,
+  `.github/workflows/`: the released images and their pipeline.
 - `img/guix/`: the base image, overlays and logs of the guest.
 - `img/keys/`: the SSH keys of the guest's root and peon accounts.
 
@@ -177,6 +182,90 @@ system: the boot servers, and also `pfinet`, the console, getty and login,
 whose services otherwise keep starting goonix's default Hurd. In such a
 guest, `ps -ef` shows every translator from the one Hurd.
 `guix/hurd64-hurdkit.scm` is the guest with both.
+
+### Release images
+
+`guix/hurd64-release.scm` is the plain guest as it is released, and
+`guix/hurd64-hurdkit-release.scm` the same on Hurdkit's GNU Mach and Hurd
+(as `guix/hurd64-hurdkit.scm`). Both are `guix/hurd64-base.scm`, the guest
+without a way in, with the login of upstream Guix's bare-hurd64 template
+(`gnu/system/examples/bare-hurd64.tmpl` in goonix): root has an empty
+password, and sshd on port 2222 accepts it. Whoever reaches that port is
+root, so the port may only be forwarded from `127.0.0.1`. They read
+nothing of the building machine, no key of `img/keys/` and no archive
+signing key, so any machine builds the same system. The login is
+`%release-sshd` in `guix/hurd64-release.scm`; its comment says how to make
+it key-only.
+
+`scripts/guix_release.sh` builds them, in `nix develop` on a machine whose
+daemon is goonix:
+
+```sh
+bash scripts/guix_release.sh check
+RELEASE_TAG=TAG bash scripts/guix_release.sh build img/release
+bash scripts/guix_release.sh smoke img/release/hurd64-TAG.qcow2 img/release/hurd64.manifest
+RELEASE_TAG=TAG bash scripts/guix_release.sh notes img/release > img/release/notes.md
+```
+
+- `check` lists what a build would build and fails when that includes a
+  package other than goonix and this repository's own: a build farm does
+  not answer, or the goonix pin left the commits that the farms built (G2).
+  With every package in the store it builds with `--no-substitutes`, so a
+  filled store does not need the farms.
+- `prefetch` builds or downloads everything the images need, but not the
+  images.
+- `build` writes `NAME-TAG.qcow2` (the compressed image as Guix writes it),
+  `NAME.manifest` and `SHA256SUMS`. It refuses a system that authorizes an
+  SSH key or trusts an archive key that goonix does not ship, a root
+  partition that contains a key of `img/keys/` or of
+  `/etc/guix/signing-key.pub`, and a partition built without its
+  translators (G4).
+- `smoke` boots an image the way the release notes say, logs in as root
+  with the empty password, and checks that the guest's Guix is goonix, that
+  every translator comes from the image's Hurd, and that the guest uses the
+  processors its kernel is built for. A downloaded image boots with
+  `guix_vm.sh` the same way: link it as `hurd64.base.qcow2` into a new
+  `GUIX_DIR` and set `GUIX_LOGIN=empty-password`.
+- `notes` writes the release notes: the pins, the QEMU command and the
+  login.
+
+The workflow `.github/workflows/images.yml` runs these on GitHub's hosted
+runners:
+
+1. Job `goonix` builds goonix with Nix once per `flake.nix` and
+   `flake.lock`, and keeps the paths of the development shell that
+   cache.nixos.org lacks, with their closures, as a Nix binary cache in the
+   Actions cache.
+2. Job `images`: `scripts/ci_runner.sh` puts `/gnu`, `/var/guix` and the
+   daemon's build directory on an ext4 disk (G4), opens `/dev/kvm`,
+   installs Nix at the version and checksum it pins, and starts goonix's
+   guix-daemon with the keys of the build farms and no signing key.
+   The Guix store comes from the Actions cache. `check` and `prefetch`
+   follow; the store is saved again when it changed, also after a failure
+   or a timeout, so that the next run goes on from there. Then `build`,
+   `smoke` for each image, and `notes`.
+3. Job `release`, for a tag `v*` only and the only job that may write:
+   `guix_release.sh publish` creates the release with the images,
+   `SHA256SUMS` and the notes.
+
+It runs for a pushed tag `v*` (a release), for pushes to `main` that touch
+the build, by hand (`workflow_dispatch`: the images as an artifact of the
+run), and on the schedule in the workflow. A run of a tag reads only the
+caches of its tag and of `main`, so the runs of `main` are what fill them.
+The scheduled run reads them before GitHub evicts caches that nobody read
+(GitHub's documentation on dependency caching says when), and shows a
+broken farm or pin before a release. With the caches filled, a run needs
+the build farms only for what the cached store lacks. A run without them
+downloads from the farms and cross-builds goonix again, within the job's
+time limit; `prefetch` saves what it got when it is stopped.
+
+`.github/workflows/test.yml` runs `make guix-test` and shellcheck of the
+release scripts for pull requests and pushes to `main`; it builds nothing,
+and the tests that need goonix skip.
+
+To release: push to `main`, wait for the `images` run of that commit to
+pass, then push a tag whose name starts with `v`: `git tag TAG && git push
+origin TAG`.
 
 ### niri platform guest
 
@@ -415,6 +504,10 @@ anonymous shared memory to the default pager.
 make target 'auth_requestUser.stamp'`, often enough that `hurd-hurdkit`
 builds serially.
 
+**G24. A release image cannot be logged into with the keys of
+`img/keys/`.** Its root has an empty password instead and peon no
+password at all; `guix_vm.sh` needs `GUIX_LOGIN=empty-password` for it.
+
 ## Verification
 
 Run these in `nix develop`. Each command exits with zero status
@@ -424,6 +517,7 @@ when its checks pass and prints what failed otherwise.
 |---|---|
 | Scripts and declarations (boots nothing) | `make guix-test` |
 | The guest boots, answers and halts | `make guix-image guix-start guix-ssh-peon guix-stop` |
+| The released images | `RELEASE_TAG=test bash scripts/guix_release.sh build DIR`, then `smoke` for each image and its manifest |
 | The guest with Hurdkit's GNU Mach and Hurd | `GUIX_DIR=$PWD/img/guix-hurdkit GUIX_SSH_PORT=2225 GUIX_OS=$PWD/guix/hurd64-hurdkit.scm bash scripts/guix_vm.sh image`, then `start`, `ssh root ps -ef` and `stop` the same way |
 | The platform guest's tests | `make stage1-check` |
 | The Wayland guest's tests | `make stage2-check` |
