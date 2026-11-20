@@ -16,7 +16,7 @@
   #:use-module (hurdkit packages hurd)
   #:use-module (hurdkit utils))
 
-(define %virtio-commit "811e00c4d350a62fba901bd5ec2c232985b4adad")
+(define %virtio-commit "c62096487e12fc4d6f370cddbe46a526289aa7e2")
 
 ;; These are source/header inputs to a cross build, not a native Hurd toolchain.
 ;; In particular the Hurd core-header union contains the .defs consumed by MIG.
@@ -70,7 +70,7 @@ directory is the one of Hurdkit's Hurd.")
              (commit %virtio-commit)))
        (file-name (git-file-name name version))
        (sha256
-        (base32 "1j24mygxjfn0xdxx9mkwm1i26nc3bnjlyi69f0vwqfzlvp03nsw1"))))
+        (base32 "0j2zs0lcmn4zqq96fdxpfsbm26442hlkhpwfcy9ilz4xjfd02a7h"))))
     (build-system gnu-build-system)
     (arguments
      (list
