@@ -160,6 +160,13 @@ fresh_root
 touch "$root/dev-kvm-absent"
 output="$(runner bash "$REPO_ROOT/scripts/ci_runner.sh" kvm 2>&1)"
 if [[ "$output" == *"no /dev/kvm"* ]]; then ok 'without /dev/kvm, kvm only says so'; else not_ok 'without /dev/kvm' "$output"; fi
+if output="$(runner bash "$REPO_ROOT/scripts/ci_runner.sh" kvm --require 2>&1)"; then
+    not_ok 'without /dev/kvm, kvm --require fails' "$output"
+elif [[ "$output" == *"need KVM"* ]]; then
+    ok 'without /dev/kvm, kvm --require fails'
+else
+    not_ok 'without /dev/kvm, kvm --require fails and says why' "$output"
+fi
 mkdir -p "$root/dev" && touch "$root/dev/kvm"
 runner bash "$REPO_ROOT/scripts/ci_runner.sh" kvm >/dev/null 2>&1
 if grep -q 'MODE="0666"' "$root/etc/udev/rules.d/99-kvm4all.rules" 2>/dev/null &&
@@ -167,6 +174,20 @@ if grep -q 'MODE="0666"' "$root/etc/udev/rules.d/99-kvm4all.rules" 2>/dev/null &
     ok 'kvm opens /dev/kvm to the runner with a udev rule'
 else
     not_ok 'kvm opens /dev/kvm with a udev rule' "$(cat "$TEST_DIR/calls" 2>/dev/null)"
+fi
+if output="$(runner bash "$REPO_ROOT/scripts/ci_runner.sh" kvm --require 2>&1)"; then
+    ok 'kvm --require passes with a usable /dev/kvm'
+else
+    not_ok 'kvm --require passes with a usable /dev/kvm' "$output"
+fi
+# The udev stub changes nothing, so this /dev/kvm stays unusable.
+chmod 000 "$root/dev/kvm"
+if [[ -r "$root/dev/kvm" ]]; then
+    echo "ok $((number += 1)) - kvm --require fails with an unusable /dev/kvm # SKIP runs as root"
+elif output="$(runner bash "$REPO_ROOT/scripts/ci_runner.sh" kvm --require 2>&1)"; then
+    not_ok 'kvm --require fails with an unusable /dev/kvm' "$output"
+else
+    ok 'kvm --require fails with an unusable /dev/kvm'
 fi
 
 # --- install-nix refuses an installer with another checksum ---
