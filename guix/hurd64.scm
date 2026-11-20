@@ -8,8 +8,13 @@
 ;; (root_ed25519.pub and peon_ed25519.pub).
 
 (use-modules (gnu) (gnu system hurd))
+(use-modules (hurdkit guest-keys))
 (use-service-modules ssh)
 (use-package-modules ssh)
+
+(define root-key (guest-root-public-key))
+(define peon-key (guest-peon-public-key))
+(define host-key (guest-host-signing-key))
 
 ;; The guest's guix command and guix-daemon are goonix, like the host's
 ;; (see goonix.scm), not the upstream Guix package.
@@ -27,8 +32,8 @@
                 (inherit config)
                 (guix %goonix)
                 (authorized-keys
-                 (if (file-exists? %host-signing-key)
-                     (cons (local-file %host-signing-key "host-signing-key.pub")
+                 (if host-key
+                     (cons host-key
                            (guix-configuration-authorized-keys config))
                      (guix-configuration-authorized-keys config)))))))
 
@@ -75,6 +80,6 @@
                    (permit-root-login 'prohibit-password)
                    (password-authentication? #f)
                    (authorized-keys
-                    `(("root" ,(local-file "../img/keys/root_ed25519.pub"))
-                      ("peon" ,(local-file "../img/keys/peon_ed25519.pub"))))))
+                    `(("root" ,root-key)
+                      ("peon" ,peon-key)))))
          %guix-services)))

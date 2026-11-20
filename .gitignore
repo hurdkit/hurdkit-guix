@@ -3,3 +3,5 @@ img/
 result
 result-*
 __pycache__/
+
+flake.local.scm

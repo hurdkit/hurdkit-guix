@@ -35,6 +35,7 @@ says how.
 
 ```
 nix/flake.nix, nix/flake.lock # development shell with goonix at a pinned commit
+flake.scm, flake.lock    # Guix flake outputs and their lock
 Makefile                # the make targets
 guix/                   # system declarations, package modules, patches
 scripts/                # build, boot and manage the guests; the gates

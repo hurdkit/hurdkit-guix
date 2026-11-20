@@ -7,8 +7,8 @@ Use this skill for work on the Guix guest (`guix/`, `Makefile`,
 
 ## Inputs
 
-- `nix/flake.nix` and `nix/flake.lock`: the development shell, with goonix (our
-  fork of GNU Guix) at a pinned commit.
+- `flake.scm` and `flake.lock`: the Guix flake outputs and their lock. The
+  Nix bootstrap is under `nix/` because the two lock formats are different.
 - `guix/hurd64.scm`: the system declaration of the guest.
 - `guix/goonix.scm`: goonix as the guest's own Guix (same commit as the lock).
 - `Makefile`: the make targets of the guests.
