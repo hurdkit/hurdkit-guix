@@ -103,6 +103,61 @@ check 'the image output is a real derivation' bash -c '
         */*-disk-image.drv) ;;
         *) exit 1 ;;
     esac' _ "$work/image"
+check 'the flake replaces only the declaration keys' bash -c '
+    mkdir "$2/reference" || exit
+    cp flake.lock "$2/reference/flake.lock"
+    cp flake.local.scm "$2/reference/flake.local.scm"
+    cp -a guix "$2/reference/guix"
+    git -C "$2/reference" init -q
+    git -C "$2/reference" add .
+    cat >"$2/reference/flake.scm" <<'\''EOF'\''
+(flake
+ (format 1)
+ (modules "guix/modules")
+ (inputs)
+ (options
+  (root-public-key string "" "Root")
+  (peon-public-key string "" "Peon")
+  (host-signing-key string "" "Host"))
+ (outputs
+  (lambda (in)
+    (use-modules (gnu) (gnu services ssh) (gnu services base) (guix gexp)
+                 (gnu system image)
+                 ((gnu image) #:select (image-type-constructor))
+                 ((gnu system images hurd) #:select (hurd64-qcow2-image-type)))
+    (define (with-keys os root peon host)
+      (operating-system
+        (inherit os)
+        (services
+         (modify-services (operating-system-user-services os)
+           (openssh-service-type
+            config => (openssh-configuration
+                       (inherit config)
+                       (authorized-keys `(("root" ,root) ("peon" ,peon)))))
+           (guix-service-type
+            config => (guix-configuration
+                       (inherit config)
+                       (authorized-keys
+                        (if host
+                            (cons host (guix-configuration-authorized-keys config))
+                            (guix-configuration-authorized-keys config)))))))))
+    (define (key name)
+      (plain-file name (option in (if (string=? name "host-signing-key.pub")
+                                     (quote host-signing-key)
+                                     (if (string=? name "root_ed25519.pub")
+                                         (quote root-public-key)
+                                         (quote peon-public-key))))))
+    `((images
+       (reference . ,((image-type-constructor hurd64-qcow2-image-type)
+                      (with-keys (load (self-file in "guix/hurd64.scm"))
+                                 (key "root_ed25519.pub")
+                                 (key "peon_ed25519.pub")
+                                 (key "host-signing-key.pub")))))))))
+EOF
+    git -C "$2/reference" add flake.scm
+    derivation=$("$1" system image -d "$2/reference#reference") || exit
+    printf "%s\n" "$derivation" >"$2/file-image"
+    cmp "$2/image" "$2/file-image" || exit' _ "$GUIX" "$work"
 
 for name in hurd64 hurd64-hurdkit hurd64-drivers hurd64-platform hurd64-wayland; do
     check "flake image $name evaluates" bash -c '
@@ -113,6 +168,16 @@ for name in hurd64 hurd64-hurdkit hurd64-drivers hurd64-platform hurd64-wayland;
                 *) exit 1 ;;
             esac' _ "$GUIX" "$name"
 done
+check 'missing public key options are named in the error' bash -c '
+    mv flake.local.scm "$2/options" || exit
+    if "$1" system image -d .#hurd64 >"$2/empty-output" 2>"$2/empty-error"; then
+        exit 1
+    fi
+    grep -q "root-public-key" "$2/empty-error" &&
+        grep -q "root_ed25519" "$2/empty-error"
+    status=$?
+    mv "$2/options" flake.local.scm
+    exit "$status"' _ "$GUIX" "$work"
 check 'the Linux reference image evaluates through the flake' bash -c '
     derivation=$("$1" system image -t qcow2 -d .#linux-reference) &&
         test -n "$derivation" && test -f "$derivation" &&

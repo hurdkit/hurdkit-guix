@@ -9,26 +9,71 @@
   (host-signing-key string "" "Public host archive signing key"))
  (outputs
   (lambda (in)
-    (use-modules (guix packages)
+    (use-modules (gnu)
+                 (guix packages)
                  (guix gexp)
                  (guix profiles)
                  (gnu system)
                  (gnu system image)
+                 (gnu services ssh)
+                 (gnu services base)
                  ((gnu image) #:select (image-type-constructor))
                  ((gnu system images hurd) #:select (hurd64-qcow2-image-type))
                  ((gnu packages virtualization) #:select (qemu))
-                 ((gnu packages ssh) #:select (openssh))
-                 ((hurdkit guest-keys)
-                  #:select (%root-public-key-file %peon-public-key-file
-                            %host-signing-key-file)))
+                 ((gnu packages ssh) #:select (openssh)))
     (define (option-value name)
       (let ((value (option in name)))
         (and (not (string-null? value)) value)))
+    (define (public-key-file name value)
+      (and value
+           (plain-file (string-append name ".pub")
+                       (if (string-suffix? "\n" value) value
+                           (string-append value "\n")))))
+    (define (with-keys os root peon host)
+      (operating-system
+        (inherit os)
+        (services
+         (modify-services (operating-system-user-services os)
+           (openssh-service-type
+            config => (openssh-configuration
+                       (inherit config)
+                       (authorized-keys
+                        (append
+                         (if root `(("root" ,root)) '())
+                         (if peon `(("peon" ,peon)) '())
+                         (if (or root peon)
+                             (filter (lambda (entry)
+                                       (not (member (car entry)
+                                                    '("root" "peon"))))
+                                     (openssh-configuration-authorized-keys
+                                      config))
+                             (openssh-configuration-authorized-keys config))))))
+           (guix-service-type
+            config => (guix-configuration
+                       (inherit config)
+                       (authorized-keys
+                        (if host
+                            (cons host (guix-configuration-authorized-keys config))
+                            (guix-configuration-authorized-keys config)))))))))
     (define (system-with-keys name)
-      (parameterize ((%root-public-key-file (option-value 'root-public-key))
-                     (%peon-public-key-file (option-value 'peon-public-key))
-                     (%host-signing-key-file (option-value 'host-signing-key)))
-        (load (self-file in (string-append "guix/" name ".scm")))))
+      (let ((declaration (load (self-file in (string-append "guix/" name ".scm"))))
+            (root (option-value 'root-public-key))
+            (peon (option-value 'peon-public-key))
+            (host (option-value 'host-signing-key)))
+        (for-each
+         (lambda (key value option-name)
+           (unless (or value
+                       (file-exists? (self-file in
+                                      (string-append "img/keys/" key ".pub"))))
+             (error (string-append "the flake has no " key
+                                   "; set the " option-name " option"))))
+         '("root_ed25519" "peon_ed25519")
+         (list root peon)
+         '("root-public-key" "peon-public-key"))
+        (with-keys declaration
+                   (public-key-file "root_ed25519" root)
+                   (public-key-file "peon_ed25519" peon)
+                   (public-key-file "host-signing-key" host))))
     (define (hurd-image name)
       ((image-type-constructor hurd64-qcow2-image-type)
        (system-with-keys name)))
