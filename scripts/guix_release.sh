@@ -130,13 +130,16 @@ classify() {
         echo cheap
         return
     fi
-    package="$(sed -E 's/-[0-9].*//' <<<"$name")"
+    # The version starts with a digit, but so may a part of the name
+    # (hurd-9pfs): the names of our packages are tried as prefixes.
     [[ -n "${OWN_PACKAGES:-}" ]] || OWN_PACKAGES="$(own_packages)"
-    if grep -qx -- "$package" <<<"$OWN_PACKAGES"; then
-        echo own
-    else
-        echo foreign
-    fi
+    while read -r package; do
+        if [[ "$name" == "$package"-[0-9]* ]]; then
+            echo own
+            return
+        fi
+    done <<<"$OWN_PACKAGES"
+    echo foreign
 }
 
 # The derivations that "guix system image --dry-run" lists as to be built,

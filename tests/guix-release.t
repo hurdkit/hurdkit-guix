@@ -62,6 +62,11 @@ expect 'a package of guix/modules is our own' own "$(release classify "$d_own")"
 expect 'goonix is our own' own "$(release classify "$d_goonix")"
 expect 'the source of our own package is our own' own "$(release classify "$d_checkout")"
 expect 'any other package is foreign' foreign "$(release classify "$d_foreign")"
+d_digit="$(drv 23 hurd-9pfs-0-1.b5b23de '')"
+expect 'a package of ours with a dash and a digit in its name is our own' own \
+    "$(release classify "$d_digit")"
+d_prefix="$(drv 24 hurd-0.9.git20251029-0.6290b4c '')"
+expect 'a package whose name is a part of ours is foreign' foreign "$(release classify "$d_prefix")"
 
 dry_run="substitute: looking for substitutes on 'https://bordeaux.guix.gnu.org'...  50.0%"$'\r'"substitute: done
 The following derivations would be built:
