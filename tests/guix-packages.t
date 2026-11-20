@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # TAP: every package of guix/modules and every system declaration in guix/
 # evaluates with goonix, and the module path does not change the plain
-# guest. Nothing is built: "guix build -n" and derivations only.
+# guest. Nothing is built: "guix build -n", and derivations without grafts.
+# With grafts, computing the derivation of a system builds what is not in the
+# store yet, to read its references (non-self-references in guix/grafts.scm),
+# and on an empty store that is most of a guest.
 set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
@@ -53,10 +56,10 @@ for system in "${systems[@]}"; do
         continue
     fi
     check "system $system evaluates" \
-        "$GUIX" system image -L guix/modules -t hurd64-qcow2 -d "$system"
+        "$GUIX" system image -L guix/modules -t hurd64-qcow2 --no-grafts -d "$system"
 done
 plain_derivation() {
-    "$GUIX" system image "$@" -t hurd64-qcow2 -d guix/hurd64.scm 2>/dev/null
+    "$GUIX" system image "$@" -t hurd64-qcow2 --no-grafts -d guix/hurd64.scm 2>/dev/null
 }
 same_plain_derivation() {
     local without with
