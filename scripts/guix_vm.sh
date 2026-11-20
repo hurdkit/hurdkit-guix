@@ -239,9 +239,16 @@ cmd_image() {
         # builds this flake no matter where it was started from.
         local flake_path="${GUIX_OS%%#*}" flake_name="${GUIX_OS#*#}"
         if [[ "$flake_path" != /* ]]; then
-            GUIX_OS="$(cd "$REPO_ROOT/$flake_path" && pwd)#$flake_name"
+            local anchored="$REPO_ROOT/$flake_path"
+            [[ -d "$anchored" ]] || die "GUIX_OS flake path does not exist: $GUIX_OS (looked in $anchored)"
+            GUIX_OS="$(cd "$anchored" && pwd)#$flake_name"
         fi
     else
+        # A relative file declaration is anchored to this repository too, so
+        # both forms of GUIX_OS resolve the same way regardless of cwd.
+        if [[ "$GUIX_OS" != /* ]]; then
+            GUIX_OS="$REPO_ROOT/$GUIX_OS"
+        fi
         [[ -f "$GUIX_OS" ]] || die "system declaration not found: $GUIX_OS"
     fi
     ensure_keys

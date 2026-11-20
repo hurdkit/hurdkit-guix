@@ -180,5 +180,19 @@ check 'guix_virtio_test.sh defaults to its own file declaration' \
         ! grep -q -- "^--option=" "$1"' \
     _ "$work/calls" "$REPO_ROOT"
 
+# A relative file declaration is anchored to the repository, not the cwd, just
+# like the flake form. Run the gate from another directory with a relative
+# GUIX_OS; the recorded image call must still name the repository's file.
+dir="$work/relative-file"
+rm -f "$work/calls"
+mkdir -p "$dir"
+( cd / && GUIX_DIR="$dir" GUIX_OS="guix/hurd64-platform.scm" VIRTIO_MATRICES="$work/matrices" \
+    bash "$REPO_ROOT/scripts/stage1_check.sh" > "$dir/out" 2>&1 )
+cleanup_pids
+: > "$work/pids"
+check 'a relative file declaration resolves to the repository from any cwd' \
+    bash -c 'test "$(tail -n 1 "$1")" = "$2/guix/hurd64-platform.scm"' \
+    _ "$work/calls" "$REPO_ROOT"
+
 echo "1..$number"
 exit "$failures"

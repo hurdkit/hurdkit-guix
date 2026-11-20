@@ -66,7 +66,9 @@ For the flake form, `guix_vm.sh` passes their contents as the
 key as `host-signing-key` when it exists. These explicit options take
 precedence over `flake.local.scm`; private keys are not passed to the flake.
 A relative flake reference (`.#hurd64`) is anchored to this repository, so the
-gate builds this flake no matter the working directory. The flake form needs a
+gate builds this flake no matter the working directory. A relative file
+declaration (`GUIX_OS=guix/hurd64.scm`) is anchored to this repository the same
+way. The flake form needs a
 goonix with the `flake` command (the implementation tree's `pre-inst-env`);
 `guix_vm.sh` refuses a flake reference when `$GUIX` has no `flake` command.
 
