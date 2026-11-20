@@ -5,6 +5,9 @@
 
 - a plain guest (`guix/hurd64.scm`);
 - a guest on Hurdkit's GNU Mach and Hurd (`guix/hurd64-hurdkit.scm`);
+- the released forms of those two, which have nothing of the machine that
+  builds them (`guix/hurd64-release.scm`,
+  `guix/hurd64-hurdkit-release.scm`);
 - a disposable guest that runs the test matrices of Hurdkit's virtio
   drivers (`guix/hurd64-drivers.scm`);
 - the guests of the Wayland and niri work with their gates
@@ -31,10 +34,20 @@ guide: the host's Guix daemon, the image build, the guests and their
 gates, and the pitfalls. The host's daemon has to be goonix too; the guide
 says how.
 
+## Released images
+
+A pushed tag `v*` is built on GitHub's runners and published as a release
+of this repository: the released guests as compressed qcow2 files,
+their checksums, and notes that name the pins and give the QEMU command.
+Their root has an empty password, as in upstream Guix's bare-hurd template,
+so forward their SSH port from `127.0.0.1` only. The "Release images"
+section of the guide says how they are built and checked.
+
 ## Layout
 
 ```
 flake.nix, flake.lock   # development shell with goonix at a pinned commit
+.github/workflows/      # the release images and the tests on GitHub
 Makefile                # the make targets
 guix/                   # system declarations, package modules, patches
 scripts/                # build, boot and manage the guests; the gates
