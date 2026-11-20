@@ -1,0 +1,29 @@
+# The TAP tests of the scripts (make guix-test) and shellcheck of the
+# release scripts, for pull requests and pushes to main. Nothing is built
+# and no guest is booted; the tests that need goonix skip.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tools of the tests
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -q -y --no-install-recommends qemu-utils tcl tcllib socat
+      - name: make guix-test
+        run: make guix-test
+      - name: shellcheck
+        run: shellcheck scripts/ci_runner.sh scripts/guix_release.sh

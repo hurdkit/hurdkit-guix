@@ -1,0 +1,185 @@
+# Build the released images (guix/hurd64-release.scm and
+# guix/hurd64-hurdkit-release.scm), boot each once, and publish them as a
+# GitHub release for a pushed tag v*. skills/GUIX.md, "Release images",
+# says how the jobs and caches fit together; the work is done by
+# scripts/ci_runner.sh and scripts/guix_release.sh.
+name: images
+
+on:
+  push:
+    # A tag v* releases. Pushes to main build and fill the caches that the
+    # runs of tags read (a run of a tag can read the caches of the default
+    # branch, not those of another tag). Path filters do not apply to tags.
+    tags: ['v*']
+    branches: [main]
+    paths:
+      - flake.nix
+      - flake.lock
+      - guix/**
+      - scripts/ci_runner.sh
+      - scripts/guix_release.sh
+      - scripts/guix_vm.sh
+      - scripts/guix_qemu_options.sh
+      - .github/workflows/images.yml
+  # By hand: the images as an artifact of the run, no release.
+  workflow_dispatch:
+  # Twice a week, so that the caches are read well before GitHub evicts
+  # caches that nobody read (a weekly run would come just as they expire),
+  # and a broken farm or pin shows before a release.
+  schedule:
+    - cron: '23 3 * * 1,4'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # goonix for nix develop, built once per flake and kept in the Actions
+  # cache as a Nix binary cache. The Guix store is kept per pins and
+  # declarations; a run that finds none for them starts from the newest.
+  goonix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Look for goonix in the cache
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hurdkit-ci/nix
+          key: nix-goonix-v1-${{ hashFiles('flake.nix', 'flake.lock') }}
+          lookup-only: true
+      - name: Install Nix
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash scripts/ci_runner.sh install-nix
+      - name: Build goonix and the development shell
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: nix develop --command guix --version
+      - name: Export goonix
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash scripts/ci_runner.sh nix-cache-export ~/.cache/hurdkit-ci/nix
+      - name: Save goonix
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hurdkit-ci/nix
+          key: nix-goonix-v1-${{ hashFiles('flake.nix', 'flake.lock') }}
+
+  images:
+    needs: goonix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    env:
+      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || format('run{0}', github.run_number) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Disk
+        run: bash scripts/ci_runner.sh disk
+      - name: KVM
+        run: bash scripts/ci_runner.sh kvm
+      - name: Install Nix
+        run: bash scripts/ci_runner.sh install-nix
+      - name: Restore goonix
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hurdkit-ci/nix
+          key: nix-goonix-v1-${{ hashFiles('flake.nix', 'flake.lock') }}
+          fail-on-cache-miss: true
+      - name: Development shell (G1)
+        run: nix develop --command guix --version
+      - name: Build users
+        run: bash scripts/ci_runner.sh guix-users
+      - name: Restore the Guix store
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hurdkit-ci/store
+          key: guix-store-v1-${{ hashFiles('flake.lock', 'guix/**') }}-${{ github.run_id }}
+          restore-keys: |
+            guix-store-v1-${{ hashFiles('flake.lock', 'guix/**') }}-
+            guix-store-v1-
+      - name: Unpack the Guix store
+        run: |
+          bash scripts/ci_runner.sh store-restore ~/.cache/hurdkit-ci/store/guix-store.tar.zst
+          echo "STORE_BEFORE=$(bash scripts/ci_runner.sh store-fingerprint)" >> "$GITHUB_ENV"
+      - name: Start the Guix daemon
+        id: daemon
+        run: nix develop --command bash scripts/ci_runner.sh guix-daemon
+      - name: Gate (G2)
+        run: nix develop --command bash scripts/guix_release.sh check
+      - name: Build what the images need
+        id: prefetch
+        timeout-minutes: 300
+        run: nix develop --command bash scripts/guix_release.sh prefetch
+      # Saved also when the step above failed or timed out, so that the
+      # next run goes on from here; not saved when nothing changed.
+      - name: Pack the Guix store
+        id: pack
+        if: always() && steps.daemon.outcome == 'success'
+        run: |
+          bash scripts/ci_runner.sh guix-stop
+          if [[ "$(bash scripts/ci_runner.sh store-fingerprint)" != "$STORE_BEFORE" ]]; then
+            bash scripts/ci_runner.sh store-save ~/.cache/hurdkit-ci/store/guix-store.tar.zst
+            echo "save=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the Guix store
+        if: always() && steps.pack.outputs.save == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hurdkit-ci/store
+          key: guix-store-v1-${{ hashFiles('flake.lock', 'guix/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Build the images
+        run: |
+          rm -f ~/.cache/hurdkit-ci/store/guix-store.tar.zst
+          nix develop --command bash scripts/ci_runner.sh guix-daemon
+          nix develop --command bash scripts/guix_release.sh build "$CI_WORK/release"
+      - name: Boot the images
+        run: |
+          for manifest in "$CI_WORK"/release/*.manifest; do
+            image="$CI_WORK/release/$(awk '$1 == "image" { print $2 }' "$manifest")"
+            nix develop --command bash scripts/guix_release.sh smoke "$image" "$manifest"
+          done
+      - name: Release notes
+        run: nix develop --command bash scripts/guix_release.sh notes "$CI_WORK/release" > "$CI_WORK/release/notes.md"
+      - name: No signing key on the builder
+        run: bash scripts/ci_runner.sh no-signing-key
+      - name: Upload the images
+        if: github.event_name == 'workflow_dispatch' || github.ref_type == 'tag'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: images
+          path: |
+            ${{ env.CI_WORK }}/release/*.qcow2
+            ${{ env.CI_WORK }}/release/SHA256SUMS
+            ${{ env.CI_WORK }}/release/notes.md
+          if-no-files-found: error
+          retention-days: 7
+          # The images are compressed already.
+          compression-level: 0
+
+  release:
+    needs: images
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: images
+          path: release
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: bash scripts/guix_release.sh publish release

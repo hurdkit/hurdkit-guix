@@ -44,6 +44,10 @@ GUIX_HOST_SIGNING_KEY="${GUIX_HOST_SIGNING_KEY:-/etc/guix/signing-key.pub}"
 # Extra options for "guix system image", for example "--image-size=8G".
 GUIX_IMAGE_OPTS="${GUIX_IMAGE_OPTS:-}"
 SSH_KEY_DIR="${SSH_KEY_DIR:-$REPO_ROOT/img/keys}"
+# How ssh logs in: "key", with the account's key from SSH_KEY_DIR, or
+# "empty-password", for the released images, whose root has an empty
+# password that sshd accepts (guix/hurd64-release.scm).
+GUIX_LOGIN="${GUIX_LOGIN:-key}"
 SSH_HOST="${SSH_HOST:-127.0.0.1}"
 # Optional QEMU arguments for "start", supplied after "--". Positional
 # parameters preserve spaces in paths and options across script boundaries.
@@ -114,6 +118,37 @@ qemu_pid() {
     fi
 }
 
+# ssh_login_options USER
+#
+# Set SSH_LOGIN_OPTIONS to the ssh options that log in as USER the way
+# GUIX_LOGIN says. Returns failure when the key of USER is missing.
+ssh_login_options() {
+    local user="$1" key
+    case "$GUIX_LOGIN" in
+        key)
+            key="$SSH_KEY_DIR/${user}_ed25519"
+            # IdentitiesOnly and IdentityAgent=none: offer this key and
+            # nothing else. ssh would otherwise try every key of a running
+            # agent first, and sshd closes the connection after six failed
+            # attempts.
+            SSH_LOGIN_OPTIONS=(-i "$key" -o IdentitiesOnly=yes -o IdentityAgent=none)
+            if [[ ! -f "$key" ]]; then
+                echo "guix_vm: no SSH key for $user: $key" >&2
+                return 1
+            fi
+            ;;
+        empty-password)
+            # No key and no password prompt: sshd lets an account with an
+            # empty password in on ssh's first request, the "none" method.
+            SSH_LOGIN_OPTIONS=(-o PubkeyAuthentication=no -o IdentityAgent=none
+                -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no)
+            ;;
+        *)
+            die "GUIX_LOGIN is '$GUIX_LOGIN'; use key or empty-password"
+            ;;
+    esac
+}
+
 # guest_ssh [-b] USER [COMMAND...]
 #
 # Run COMMAND in the guest as USER, or a login shell without COMMAND.
@@ -125,12 +160,8 @@ guest_ssh() {
         shift
     fi
     local user="$1"; shift
-    local key="$SSH_KEY_DIR/${user}_ed25519"
-    [[ -f "$key" ]] || die "no SSH key for $user: $key"
-    # IdentitiesOnly and IdentityAgent=none: offer this key and nothing
-    # else. ssh would otherwise try every key of a running agent first, and
-    # sshd closes the connection after six failed attempts.
-    ssh -i "$key" -o IdentitiesOnly=yes -o IdentityAgent=none \
+    ssh_login_options "$user" || exit 1
+    ssh "${SSH_LOGIN_OPTIONS[@]}" \
         -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
         -o LogLevel=ERROR -o ConnectTimeout=10 "${batch[@]}" \
         -p "$GUIX_SSH_PORT" "$user@$SSH_HOST" "$@"
@@ -400,9 +431,9 @@ cmd_stop() {
         # Let the guest unmount its filesystems and request ACPI power-off.
         # QMP quit is not a graceful shutdown and must not be used first.
         # Guix's /sbin/halt is Shepherd's halt, not util-linux's halt -p.
+        ssh_login_options root || true
         timeout --signal=TERM --kill-after=2s 15s \
-            ssh -i "$SSH_KEY_DIR/root_ed25519" -o IdentitiesOnly=yes \
-            -o IdentityAgent=none -o StrictHostKeyChecking=no \
+            ssh "${SSH_LOGIN_OPTIONS[@]}" -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
             -o ConnectTimeout=10 -o BatchMode=yes \
             -p "$GUIX_SSH_PORT" "root@$SSH_HOST" \
@@ -443,9 +474,9 @@ cmd_stop() {
     # The SSH client may wait on its connection after halt has already
     # stopped the guest. It is a control channel, not the shutdown gate:
     # it runs in the background, bounded, while the serial log is watched.
+    ssh_login_options root || true
     timeout --signal=TERM --kill-after=2s 15s \
-        ssh -i "$SSH_KEY_DIR/root_ed25519" -o IdentitiesOnly=yes \
-        -o IdentityAgent=none -o StrictHostKeyChecking=no \
+        ssh "${SSH_LOGIN_OPTIONS[@]}" -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
         -o ConnectTimeout=10 -o BatchMode=yes \
         -p "$GUIX_SSH_PORT" "root@$SSH_HOST" halt >/dev/null 2>&1 &
