@@ -8,7 +8,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export GUIX_DIR="${GUIX_DIR:-$ROOT/img/guix-platform}"
 export GUIX_SSH_PORT="${GUIX_SSH_PORT:-2226}"
-export GUIX_OS="$ROOT/guix/hurd64-platform.scm"
+export GUIX_OS="${GUIX_OS:-$ROOT/guix/hurd64-platform.scm}"
 # The guest boots gnumach-hurdkit-smp; give it as many processors as that
 # kernel is built for.
 export GUIX_CPUS="${GUIX_CPUS:-2}"

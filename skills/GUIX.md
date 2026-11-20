@@ -65,6 +65,10 @@ For the flake form, `guix_vm.sh` passes their contents as the
 `root-public-key` and `peon-public-key` options, and the host's public signing
 key as `host-signing-key` when it exists. These explicit options take
 precedence over `flake.local.scm`; private keys are not passed to the flake.
+A relative flake reference (`.#hurd64`) is anchored to this repository, so the
+gate builds this flake no matter the working directory. The flake form needs a
+goonix with the `flake` command (the implementation tree's `pre-inst-env`);
+`guix_vm.sh` refuses a flake reference when `$GUIX` has no `flake` command.
 
 The declaration reads the accounts' public keys from `img/keys/`
 (`root_ed25519.pub`, `peon_ed25519.pub`); `ssh-keygen -q -t ed25519 -N ''

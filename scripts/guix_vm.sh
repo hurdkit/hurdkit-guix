@@ -224,6 +224,15 @@ cmd_image() {
     local flake_reference=
     if [[ "$GUIX_OS" == *#* ]]; then
         flake_reference=yes
+        "$GUIX" flake --help >/dev/null 2>&1 || \
+            die "$GUIX has no flake command; a flake reference ($GUIX_OS) needs the goonix of the implementation tree (pre-inst-env), not the pinned shell guix"
+        # guix resolves the path part of PATH#NAME against the working
+        # directory. Anchor a relative one to this repository so the gate
+        # builds this flake no matter where it was started from.
+        local flake_path="${GUIX_OS%%#*}" flake_name="${GUIX_OS#*#}"
+        if [[ "$flake_path" != /* ]]; then
+            GUIX_OS="$(cd "$REPO_ROOT/$flake_path" && pwd)#$flake_name"
+        fi
     else
         [[ -f "$GUIX_OS" ]] || die "system declaration not found: $GUIX_OS"
     fi
