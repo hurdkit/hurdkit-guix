@@ -107,8 +107,8 @@ check 'a failed matrix fails the run' test "$rc" = 1
 check 'a failed matrix leaves the guest running' bash -c '! grep -qx stop "$1"' _ "$TEST_DIR/calls"
 
 run 9p FAKE_STOP_FAILS=1
-check 'an unclean shutdown after a passing matrix fails the run' \
-    bash -c '[[ "$1" == 1 ]] && grep -q "did not shut down cleanly" "$2"' _ "$rc" "$TEST_DIR/output"
+check 'an unclean shutdown after a passing matrix fails the run with status 3' \
+    bash -c '[[ "$1" == 3 ]] && grep -q "did not shut down cleanly" "$2"' _ "$rc" "$TEST_DIR/output"
 
 run 9p REUSE=1
 check 'REUSE=1 runs the matrix on the running guest' \

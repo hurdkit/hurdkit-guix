@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Stage 0 live gate. Run from the pinned goonix shell; no Python tooling.
 # Each case uses a disposable overlay and leaves the guest stopped.
+# STAGE0_GPUS names the host GPUs for the Linux reference; empty, only the
+# Hurd guest is checked (a machine without a GPU, such as a CI runner).
 set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 ARTIFACT_DIR="${STAGE0_ARTIFACT_DIR:-$REPO_ROOT/img/stage0}"
 mkdir -p "$ARTIFACT_DIR"
-STAGE0_GPUS="${STAGE0_GPUS:-amd nvidia}"
-STAGE0_VENUS_GPUS="${STAGE0_VENUS_GPUS:-amd nvidia}"
+STAGE0_GPUS="${STAGE0_GPUS-amd nvidia}"
+STAGE0_VENUS_GPUS="${STAGE0_VENUS_GPUS-amd nvidia}"
 GUIX_OS="${GUIX_OS:-guix/hurd64.scm}"
 export GUIX_OS
 failures=0

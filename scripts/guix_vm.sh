@@ -5,6 +5,8 @@
 # Usage: guix_vm.sh <command> [arguments]
 #
 #   image              build the declared system into img/guix/hurd64.base.qcow2
+#   keys               create the accounts' SSH keys in img/keys when missing
+#                      (image does that too; the declarations read them)
 #   start [persist] [-- QEMU-ARG...]
 #                      boot in the background and wait for SSH; with
 #                      "persist" its disk state is kept between runs
@@ -578,10 +580,11 @@ cmd_print_options() {
 }
 
 command="${1:-}"
-[[ -n "$command" ]] || die "usage: guix_vm.sh image|start [persist] [-- QEMU-ARG...]|status|ssh USER [CMD...]|stop|screenshot [FILE]|run|repair|reset-state|monitor COMMAND|qmp COMMAND|print-options"
+[[ -n "$command" ]] || die "usage: guix_vm.sh image|keys|start [persist] [-- QEMU-ARG...]|status|ssh USER [CMD...]|stop|screenshot [FILE]|run|repair|reset-state|monitor COMMAND|qmp COMMAND|print-options"
 shift
 case "$command" in
     image)       cmd_image "$@" ;;
+    keys)        ensure_keys ;;
     start)
         start_mode=""
         if [[ "${1:-}" == persist ]]; then
