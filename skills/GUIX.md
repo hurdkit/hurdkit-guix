@@ -55,8 +55,16 @@ pins: the host's daemon (see "Host daemon"), the `guix` command of the
 
 ```sh
 nix develop ./nix
-guix system image --image-type=hurd64-qcow2 guix/hurd64.scm
+make guix-image
+# Or evaluate and build the same guest through the Guix flake:
+make GUIX_OS=.#hurd64 guix-image
 ```
+
+For a file declaration, the image command reads the public keys in `img/keys/`.
+For the flake form, `guix_vm.sh` passes their contents as the
+`root-public-key` and `peon-public-key` options, and the host's public signing
+key as `host-signing-key` when it exists. These explicit options take
+precedence over `flake.local.scm`; private keys are not passed to the flake.
 
 The declaration reads the accounts' public keys from `img/keys/`
 (`root_ed25519.pub`, `peon_ed25519.pub`); `ssh-keygen -q -t ed25519 -N ''

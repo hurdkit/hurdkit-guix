@@ -40,6 +40,7 @@ source "$SCRIPT_DIR/guix_qemu_options.sh"
 GUIX="${GUIX:-guix}"
 GUIX_OS="${GUIX_OS:-$REPO_ROOT/guix/hurd64.scm}"
 GUIX_IMAGE_TYPE="${GUIX_IMAGE_TYPE:-hurd64-qcow2}"
+GUIX_HOST_SIGNING_KEY="${GUIX_HOST_SIGNING_KEY:-/etc/guix/signing-key.pub}"
 # Extra options for "guix system image", for example "--image-size=8G".
 GUIX_IMAGE_OPTS="${GUIX_IMAGE_OPTS:-}"
 SSH_KEY_DIR="${SSH_KEY_DIR:-$REPO_ROOT/img/keys}"
@@ -252,8 +253,15 @@ would be corrupt on top of a new one. Remove it first: make guix-reset-state"
     # standard output; the build log goes to standard error.
     # shellcheck disable=SC2086
     if [[ -n "$flake_reference" ]]; then
+        local -a flake_options=(
+            "--option=root-public-key=$(cat "$SSH_KEY_DIR/root_ed25519.pub")"
+            "--option=peon-public-key=$(cat "$SSH_KEY_DIR/peon_ed25519.pub")"
+        )
+        if [[ -f "$GUIX_HOST_SIGNING_KEY" ]]; then
+            flake_options+=("--option=host-signing-key=$(cat "$GUIX_HOST_SIGNING_KEY")")
+        fi
         store_image="$("$GUIX" system image \
-            --image-type="$GUIX_IMAGE_TYPE" \
+            --image-type="$GUIX_IMAGE_TYPE" "${flake_options[@]}" \
             $GUIX_IMAGE_OPTS --root="$STORE_LINK" "$GUIX_OS" | tail -n 1)"
     else
         store_image="$("$GUIX" system image --load-path="$REPO_ROOT/guix/modules" \

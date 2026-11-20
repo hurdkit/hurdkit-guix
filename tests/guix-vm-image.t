@@ -7,6 +7,7 @@ trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin" "$work/guix" "$work/keys" "$work/out"
 printf 'ssh-ed25519 test\n' > "$work/keys/root_ed25519.pub"
 printf 'ssh-ed25519 test\n' > "$work/keys/peon_ed25519.pub"
+printf 'public host signing key\n' > "$work/host-signing-key.pub"
 printf 'synthetic identity\n' > "$work/keys/root_ed25519"
 printf 'synthetic identity\n' > "$work/keys/peon_ed25519"
 : > "$work/declaration.scm"
@@ -35,6 +36,7 @@ chmod +x "$work/bin/"*
 export GUIX_TEST_CALLS="$work/calls" GUIX_TEST_IMAGE="$work/store-image"
 export GUIX="$work/bin/guix" QEMU_IMG="$work/bin/qemu-img"
 export GUIX_DIR="$work/guix" SSH_KEY_DIR="$work/keys"
+export GUIX_HOST_SIGNING_KEY="$work/host-signing-key.pub"
 export PATH="$work/bin:$PATH"
 
 number=0
@@ -58,7 +60,8 @@ fi
 check 'a file declaration stays the default image source' \
     bash -c 'test "$(tail -n 1 "$1")" = "$2" &&
         grep -qx -- "--load-path=$3/guix/modules" "$1" &&
-        grep -qx -- "--image-type=hurd64-qcow2" "$1"' \
+        grep -qx -- "--image-type=hurd64-qcow2" "$1" &&
+        ! grep -q -- '^--option=' "$1"' \
     _ "$work/calls" "$work/declaration.scm" "$REPO_ROOT"
 
 rm -f "$work/guix/hurd64.base.qcow2"
@@ -70,8 +73,11 @@ fi
 check 'a flake reference is passed to guix without a file check' \
     bash -c 'test "$(tail -n 1 "$1")" = .#hurd64 &&
         ! grep -q -- "--load-path=" "$1" &&
-        grep -qx -- "--image-type=hurd64-qcow2" "$1"' \
-    _ "$work/calls"
+        grep -qx -- "--image-type=hurd64-qcow2" "$1" &&
+        grep -Fxq -- "--option=root-public-key=$(cat "$2/keys/root_ed25519.pub")" "$1" &&
+        grep -Fxq -- "--option=peon-public-key=$(cat "$2/keys/peon_ed25519.pub")" "$1" &&
+        grep -Fxq -- "--option=host-signing-key=$(cat "$2/host-signing-key.pub")" "$1"' \
+    _ "$work/calls" "$work"
 check 'make preserves a flake reference as the image source' \
     bash -c 'test "$(make -s -f "$1/Makefile" --no-print-directory \
         GUIX_OS=.#hurd64 GUIX_DIR="$2" SSH_KEY_DIR="$2/keys" \

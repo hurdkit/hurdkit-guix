@@ -37,17 +37,7 @@
            (openssh-service-type
             config => (openssh-configuration
                        (inherit config)
-                       (authorized-keys
-                        (append
-                         (if root `(("root" ,root)) '())
-                         (if peon `(("peon" ,peon)) '())
-                         (if (or root peon)
-                             (filter (lambda (entry)
-                                       (not (member (car entry)
-                                                    '("root" "peon"))))
-                                     (openssh-configuration-authorized-keys
-                                      config))
-                             (openssh-configuration-authorized-keys config))))))
+                       (authorized-keys `(("root" ,root) ("peon" ,peon)))))
            (guix-service-type
             config => (guix-configuration
                        (inherit config)
@@ -62,9 +52,7 @@
             (host (option-value 'host-signing-key)))
         (for-each
          (lambda (key value option-name)
-           (unless (or value
-                       (file-exists? (self-file in
-                                      (string-append "img/keys/" key ".pub"))))
+           (unless value
              (error (string-append "the flake has no " key
                                    "; set the " option-name " option"))))
          '("root_ed25519" "peon_ed25519")

@@ -103,6 +103,27 @@ check 'the image output is a real derivation' bash -c '
         */*-disk-image.drv) ;;
         *) exit 1 ;;
     esac' _ "$work/image"
+check 'command-line and local public key options give one derivation' bash -c '
+    args=(--option=root-public-key="$(cat .guix-local-secrets/root.pub)"
+          --option=peon-public-key="$(cat .guix-local-secrets/peon.pub)")
+    if [[ -f /etc/guix/signing-key.pub ]]; then
+        args+=(--option=host-signing-key="$(cat /etc/guix/signing-key.pub)")
+    fi
+    "$1" system image "${args[@]}" -d .#hurd64 >"$2/options-image" || exit
+    cmp "$2/image" "$2/options-image" || exit' _ "$GUIX" "$work"
+check 'an explicit key option takes precedence over local options' bash -c '
+    cp flake.local.scm "$2/local-options" || exit
+    sed -i "s/ssh-ed25519 /ssh-rsa /" flake.local.scm
+    args=(--option=root-public-key="$(cat .guix-local-secrets/root.pub)"
+          --option=peon-public-key="$(cat .guix-local-secrets/peon.pub)")
+    if [[ -f /etc/guix/signing-key.pub ]]; then
+        args+=(--option=host-signing-key="$(cat /etc/guix/signing-key.pub)")
+    fi
+    "$1" system image "${args[@]}" -d .#hurd64 >"$2/precedence-image"
+    status=$?
+    mv "$2/local-options" flake.local.scm
+    test "$status" -eq 0 || exit "$status"
+    cmp "$2/image" "$2/precedence-image" || exit' _ "$GUIX" "$work"
 check 'the flake replaces only the declaration keys' bash -c '
     mkdir "$2/reference" || exit
     cp flake.lock "$2/reference/flake.lock"
