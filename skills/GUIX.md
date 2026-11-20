@@ -7,7 +7,7 @@ Use this skill for work on the Guix guest (`guix/`, `Makefile`,
 
 ## Inputs
 
-- `flake.nix` and `flake.lock`: the development shell, with goonix (our
+- `nix/flake.nix` and `nix/flake.lock`: the development shell, with goonix (our
   fork of GNU Guix) at a pinned commit.
 - `guix/hurd64.scm`: the system declaration of the guest.
 - `guix/goonix.scm`: goonix as the guest's own Guix (same commit as the lock).
@@ -46,14 +46,14 @@ with key-based SSH.
 
 ### Build the image
 
-Host, shell and guest all run goonix at the commit that `flake.lock`
+Host, shell and guest all run goonix at the commit that `nix/flake.lock`
 pins: the host's daemon (see "Host daemon"), the `guix` command of the
-`nix develop` shell, and the guest's Guix through
+`nix develop ./nix` shell, and the guest's Guix through
 `guix/goonix.scm`. Run every Guix command in that shell and never run
 `guix pull` for this work.
 
 ```sh
-nix develop
+nix develop ./nix
 guix system image --image-type=hurd64-qcow2 guix/hurd64.scm
 ```
 
@@ -348,7 +348,7 @@ describes a disk that no longer exists and the guest sees a corrupt
 filesystem. Copy what you need out with `scp`, then `make guix-reset-state`.
 
 **G9. Nix only sees files that git knows.** After editing `flake.nix`,
-`git add` it before `nix develop`. (Guix reads `guix/` from the working
+`git add` it before `nix develop ./nix`. (Guix reads `guix/` from the working
 directory, so this does not apply there.)
 
 **G10. The store image is read-only and compressed.** `guix_vm.sh image`
@@ -360,7 +360,7 @@ boot the store file without `-snapshot`.
 content. Set `GUIX_IMAGE_OPTS=--image-size=8G` when you need room.
 
 **G13. Parallel heavy jobs make everything look hung.** Building goonix or
-an image while a guest runs saturates the disk, and `nix develop` waits
+an image while a guest runs saturates the disk, and `nix develop ./nix` waits
 silently on a store lock. Run heavy steps one after another; `cat
 /proc/pressure/io` shows whether the disk is the bottleneck.
 
@@ -417,7 +417,7 @@ builds serially.
 
 ## Verification
 
-Run these in `nix develop`. Each command exits with zero status
+Run these in `nix develop ./nix`. Each command exits with zero status
 when its checks pass and prints what failed otherwise.
 
 | Check | Command |

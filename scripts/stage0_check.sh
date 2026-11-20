@@ -33,7 +33,7 @@ run_logged() {
 }
 
 [[ "$(guix --version | head -n 1)" == *goonix* ]] || {
-    echo 'stage0-check: run inside nix develop' >&2
+    echo 'stage0-check: run inside nix develop ./nix' >&2
     exit 1
 }
 

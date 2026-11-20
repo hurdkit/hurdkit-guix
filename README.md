@@ -19,7 +19,7 @@ moves only when someone moves it.
 ## Quick start
 
 ```sh
-nix develop                  # the pinned goonix and the host tools
+nix develop ./nix         # the pinned goonix and the host tools
 make guix-test               # scripts and declarations; boots nothing
 make guix-image guix-start   # build the plain guest, boot it, wait for SSH
 make guix-ssh                # a root shell in it
@@ -34,7 +34,7 @@ says how.
 ## Layout
 
 ```
-flake.nix, flake.lock   # development shell with goonix at a pinned commit
+nix/flake.nix, nix/flake.lock # development shell with goonix at a pinned commit
 Makefile                # the make targets
 guix/                   # system declarations, package modules, patches
 scripts/                # build, boot and manage the guests; the gates

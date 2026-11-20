@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # TAP test: the Guix of the guest (guix/goonix.scm) is built from the same
-# goonix commit that flake.lock pins for the host-side guix command.
+# goonix commit that nix/flake.lock pins for the host-side guix command.
 # A mismatch builds images with one Guix and runs another inside them.
 set -uo pipefail
 
@@ -13,7 +13,7 @@ lock_rev="$(python3 -I -c '
 import json, sys
 nodes = json.load(open(sys.argv[1]))["nodes"]
 print(nodes[nodes["root"]["inputs"]["goonix"]]["locked"]["rev"])
-' "$REPO_ROOT/flake.lock" 2>/dev/null)"
+' "$REPO_ROOT/nix/flake.lock" 2>/dev/null)"
 scm_rev="$(sed -n 's/^(define %goonix-commit "\([0-9a-f]*\)")$/\1/p' \
     "$REPO_ROOT/guix/goonix.scm")"
 
@@ -25,9 +25,9 @@ else
     failures=1
 fi
 if [[ -n "$lock_rev" && "$scm_rev" == "$lock_rev" ]]; then
-    ok 'guix/goonix.scm builds the goonix commit of flake.lock'
+    ok 'guix/goonix.scm builds the goonix commit of nix/flake.lock'
 else
-    not_ok "guix/goonix.scm builds $scm_rev, flake.lock pins $lock_rev"
+    not_ok "guix/goonix.scm builds $scm_rev, nix/flake.lock pins $lock_rev"
     echo '# update %goonix-commit and its hash in guix/goonix.scm (see its header)'
     failures=1
 fi
