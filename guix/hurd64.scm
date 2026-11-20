@@ -8,22 +8,37 @@
 ;; (root_ed25519.pub and peon_ed25519.pub).
 
 (use-modules (gnu) (gnu system hurd))
+
+;; A plain invocation has no -L. Do not reload the module when the flake has
+;; already imported it: that would replace the parameters it set.
+(unless (resolve-module '(hurdkit guest-keys) #:ensure #f)
+  (save-module-excursion
+   (lambda ()
+     (load (string-append (dirname (current-filename))
+                          "/modules/hurdkit/guest-keys.scm")))))
 (use-modules (hurdkit guest-keys))
 (use-service-modules ssh)
 (use-package-modules ssh)
 
-(define root-key (guest-root-public-key))
-(define peon-key (guest-peon-public-key))
-(define host-key (guest-host-signing-key))
+(define root-key
+  (or (guest-root-public-key)
+      (local-file "../img/keys/root_ed25519.pub")))
+(define peon-key
+  (or (guest-peon-public-key)
+      (local-file "../img/keys/peon_ed25519.pub")))
+;; The host's archive signing key, if it has one (make guix-authorize-host
+;; creates it). The guest trusts it, so "guix copy" from the host works.
+(define %host-signing-key "/etc/guix/signing-key.pub")
+
+(define host-key
+  (or (guest-host-signing-key)
+      (and (file-exists? %host-signing-key)
+           (local-file %host-signing-key "host-signing-key.pub"))))
 
 ;; The guest's guix command and guix-daemon are goonix, like the host's
 ;; (see goonix.scm), not the upstream Guix package.
 (define %goonix
   (load "goonix.scm"))
-
-;; The host's archive signing key, if it has one (make guix-authorize-host
-;; creates it). The guest trusts it, so "guix copy" from the host works.
-(define %host-signing-key "/etc/guix/signing-key.pub")
 
 (define %guix-services
   (modify-services %base-services+qemu-networking/hurd

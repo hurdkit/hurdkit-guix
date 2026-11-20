@@ -10,7 +10,8 @@ Use this skill for work on the Guix guest (`guix/`, `Makefile`,
 - `flake.scm` and `flake.lock`: the Guix flake outputs and their lock. The
   Nix bootstrap is under `nix/` because the two lock formats are different.
 - `guix/hurd64.scm`: the system declaration of the guest.
-- `guix/goonix.scm`: goonix as the guest's own Guix (same commit as the lock).
+- `guix/goonix.scm`: goonix as the guest's own Guix (same commit as
+  `nix/flake.lock`).
 - `Makefile`: the make targets of the guests.
 - `scripts/guix_vm.sh`: builds, boots and manages the guest.
 - `img/guix/`: the base image, overlays and logs of the guest.
@@ -79,7 +80,7 @@ The guest's `guix --version` prints the same goonix line as on the host.
 
 The host's Guix daemon has to be goonix too. On NixOS, with goonix as an
 input of the system flake (`goonix.url = "github:hurdkit/goonix/goonix";`,
-locked at the commit `flake.lock` pins; goonix's `main` branch mirrors
+locked at the commit `nix/flake.lock` pins; goonix's `main` branch mirrors
 upstream Guix, its `goonix` branch has the fork):
 
 ```nix
@@ -93,7 +94,7 @@ guix-daemon.socket`. If the service restarted before its socket ("Socket
 service guix-daemon.service already active, refusing"), run `systemctl stop
 guix-daemon.service` and `systemctl start guix-daemon.socket`.
 
-To move the goonix pin, update `flake.lock` (`nix flake update goonix`),
+To move the goonix pin, update `nix/flake.lock` (`nix flake update goonix`),
 the system flake's lock, and `%goonix-commit` with its hash in
 `guix/goonix.scm`; `tests/goonix-pin.t` compares the last two.
 
