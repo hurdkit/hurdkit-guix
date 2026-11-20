@@ -17,37 +17,25 @@ for command in ssh-keygen git tar xz gzip; do
 done
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/hurdkit-guix-flake.XXXXXX")"
+trap 'chmod -R u+w "$work" 2>/dev/null; rm -rf "$work"' EXIT
 mkdir -p "$work/home" "$work/config" "$work/vault" "$work/cache"
 chmod 700 "$work/home" "$work/config" "$work/vault"
 export HOME="$work/home" XDG_CONFIG_HOME="$work/config" XDG_CACHE_HOME="$work/cache"
 export GUIX_SECRETS_TEST_TMPDIR="$work"
-export GUIX_SECRETS_LOCAL_OPTIONS_DIRECTORY="$REPO_ROOT"
 identity="$work/identity"
 ssh-keygen -q -t ed25519 -N '' -f "$identity"
-saved_keys=
-if [[ -f img/keys/root_ed25519.pub && -f img/keys/peon_ed25519.pub ]]; then
-    saved_keys=yes
-    mkdir -p "$work/keys"
-    cp img/keys/root_ed25519.pub "$work/keys/root_ed25519.pub"
-    cp img/keys/peon_ed25519.pub "$work/keys/peon_ed25519.pub"
-fi
-rm -f flake.local.scm
-cleanup() {
-    local status=$?
-    trap - EXIT INT TERM HUP
-    if [[ -n "$saved_keys" ]]; then
-        cp "$work/keys/root_ed25519.pub" img/keys/root_ed25519.pub
-        cp "$work/keys/peon_ed25519.pub" img/keys/peon_ed25519.pub
-    else
-        rm -f img/keys/root_ed25519.pub img/keys/peon_ed25519.pub
-    fi
-    rm -rf "$work" "$REPO_ROOT/.guix-local-secrets"
-    rm -f "$REPO_ROOT/flake.local.scm"
-    exit "$status"
-}
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM HUP
+checkout_status="$(git status --porcelain)"
+checkout_keys="$(for file in img/keys/root_ed25519.pub img/keys/peon_ed25519.pub; do
+    [[ -f "$file" ]] && sha256sum "$file"
+done)"
+checkout_options=
+[[ -f flake.local.scm ]] && checkout_options="$(sha256sum flake.local.scm)"
+mkdir -p "$work/tree"
+git ls-files -z | xargs -0 cp --parents -t "$work/tree"
+git -C "$work/tree" init -q
+git -C "$work/tree" add .
+cd "$work/tree" || exit 1
+export GUIX_SECRETS_LOCAL_OPTIONS_DIRECTORY="$work/tree"
 
 number=0
 failures=0
@@ -64,7 +52,7 @@ check() {
 }
 
 vault_command() {
-    "$GUIX" secrets --local --directory="$REPO_ROOT/.guix-local-secrets" \
+    "$GUIX" secrets --local --directory="$work/tree/.guix-local-secrets" \
         --identity="$identity" "$@"
 }
 check 'the local vault is initialized' vault_command init
@@ -87,8 +75,8 @@ if ((failures)); then
     exit "$failures"
 fi
 check 'the vault writes public local options' test -s flake.local.scm
-# The ignored public files give the established -f path the same public
-# halves as the flake's local options. No private key is read here.
+# The ignored public files in the copy give the established -f path the same
+# public halves as the flake's local options. No private key is read here.
 mkdir -p img/keys
 cp .guix-local-secrets/root.pub img/keys/root_ed25519.pub
 cp .guix-local-secrets/peon.pub img/keys/peon_ed25519.pub
@@ -132,15 +120,27 @@ check 'the Linux reference image evaluates through the flake' bash -c '
             */*-image.qcow2.drv) ;;
             *) exit 1 ;;
         esac' _ "$GUIX"
-check 'the plain declaration still evaluates' bash -c '
-    derivation=$("$1" system image -L guix/modules -t hurd64-qcow2 -d guix/hurd64.scm) &&
-        test -n "$derivation" && test -f "$derivation"' _ "$GUIX"
+check 'the plain declaration is independent of the working directory' bash -c '
+    "$1" system image -L guix/modules -t hurd64-qcow2 -d guix/hurd64.scm >"$3/root" || exit
+    (cd guix && "$1" system image -L modules -t hurd64-qcow2 -d hurd64.scm >"$3/subdir") || exit
+    cmp "$3/root" "$3/subdir" || exit
+    derivation=$(cat "$3/root")
+    test -n "$derivation" && test -f "$derivation"' _ "$GUIX" "$PWD" "$work"
 check 'no private key is tracked' bash -c '
     private="BEGIN OPENSSH PRIVATE KEY"
     age="AGE-SECRET-KEY-"
     git ls-files -z | grep -z -v -x 'tests/goonix-flake.t' |
         xargs -0 grep -Il -m1 -e "$private" -e "$age" >"$1" || true
     test ! -s "$1"' _ "$work/private-scan"
+check 'the checkout and its local public files are unchanged' bash -c '
+    cd "$1" || exit
+    test "$(git status --porcelain)" = "$2" || exit
+    test "$(for file in img/keys/root_ed25519.pub img/keys/peon_ed25519.pub; do
+        [[ -f "$file" ]] && sha256sum "$file"
+    done)" = "$3" || exit
+    options=
+    [[ -f flake.local.scm ]] && options="$(sha256sum flake.local.scm)"
+    test "$options" = "$4"' _ "$REPO_ROOT" "$checkout_status" "$checkout_keys" "$checkout_options"
 
 echo "1..$number"
 exit "$failures"
