@@ -254,12 +254,14 @@ else
     failures=1
 fi
 # An image built by another Guix is not the declared system: image must
-# refuse it before building anything.
+# refuse it before building anything. This fake has no flake command, like an
+# upstream Guix, so the refusal cannot be mistaken for the flake fallback.
 mkdir -p "$TEST_DIR/other-bin"
 cat > "$TEST_DIR/other-bin/guix" <<'SH'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TEST_DIR/other-guix.calls"
 [[ "${1:-}" == --version ]] && echo 'guix (GNU Guix) 1.5.0'
+[[ "${1:-}" == flake ]] && exit 1
 exit 0
 SH
 chmod +x "$TEST_DIR/other-bin/guix"
@@ -275,6 +277,81 @@ if (( other_guix_rc != 0 )) && grep -q 'is not goonix' "$TEST_DIR/other-guix-out
 else
     not_ok 'image used a Guix other than goonix'
     sed 's/^/# /' "$TEST_DIR/other-guix-output"
+    failures=1
+fi
+# A guix built from the implementation worktree reports an upstream-style
+# version but has the goonix-only flake command. It is accepted for a flake
+# reference and refused for a file declaration; a guix whose flake command
+# fails is refused for a flake reference too.
+mkdir -p "$TEST_DIR/flake-bin" "$TEST_DIR/flake-keys" "$TEST_DIR/noflake-bin"
+printf 'ssh-ed25519 root-test\n' > "$TEST_DIR/flake-keys/root_ed25519.pub"
+printf 'ssh-ed25519 peon-test\n' > "$TEST_DIR/flake-keys/peon_ed25519.pub"
+printf 'fake private key\n' > "$TEST_DIR/flake-keys/root_ed25519"
+printf 'fake private key\n' > "$TEST_DIR/flake-keys/peon_ed25519"
+chmod 600 "$TEST_DIR/flake-keys/root_ed25519" "$TEST_DIR/flake-keys/peon_ed25519"
+qemu-img create -q -f qcow2 "$TEST_DIR/flake-store-image" 16M
+cat > "$TEST_DIR/flake-bin/guix" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FLAKE_GUIX_CALLS:-$TEST_DIR/flake-guix.calls}"
+case "${1:-}" in
+    --version) echo 'guix (GNU Guix) 1.5.0'; exit 0 ;;
+    flake) exit 0 ;;
+    system) printf '%s\n' "$TEST_DIR/flake-store-image"; exit 0 ;;
+esac
+exit 0
+SH
+cat > "$TEST_DIR/noflake-bin/guix" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TEST_DIR/noflake-guix.calls"
+case "${1:-}" in
+    --version) echo 'guix (GNU Guix) 1.5.0'; exit 0 ;;
+    flake) echo 'guix: flake: command not found' >&2; exit 1 ;;
+esac
+exit 0
+SH
+chmod +x "$TEST_DIR/flake-bin/guix" "$TEST_DIR/noflake-bin/guix"
+touch "$TEST_DIR/flake-system.scm"
+set +e
+PATH="$TEST_DIR/bin:$PATH" GUIX="$TEST_DIR/flake-bin/guix" \
+    GUIX_DIR="$TEST_DIR/flake-guix" SSH_KEY_DIR="$TEST_DIR/flake-keys" \
+    GUIX_HOST_SIGNING_KEY="$TEST_DIR/no-host-signing-key.pub" \
+    GUIX_OS="$TEST_DIR#hurd64" \
+    bash "$REPO_ROOT/scripts/guix_vm.sh" image > "$TEST_DIR/flake-accept-output" 2>&1
+flake_accept_rc=$?
+PATH="$TEST_DIR/bin:$PATH" GUIX="$TEST_DIR/flake-bin/guix" \
+    GUIX_DIR="$TEST_DIR/flake-file-guix" SSH_KEY_DIR="$TEST_DIR/flake-keys" \
+    GUIX_HOST_SIGNING_KEY="$TEST_DIR/no-host-signing-key.pub" \
+    GUIX_OS="$TEST_DIR/flake-system.scm" FLAKE_GUIX_CALLS="$TEST_DIR/flake-file.calls" \
+    bash "$REPO_ROOT/scripts/guix_vm.sh" image > "$TEST_DIR/flake-file-output" 2>&1
+flake_file_rc=$?
+PATH="$TEST_DIR/bin:$PATH" GUIX="$TEST_DIR/noflake-bin/guix" \
+    GUIX_DIR="$TEST_DIR/noflake-guix" SSH_KEY_DIR="$TEST_DIR/flake-keys" \
+    GUIX_HOST_SIGNING_KEY="$TEST_DIR/no-host-signing-key.pub" \
+    GUIX_OS="$TEST_DIR#hurd64" \
+    bash "$REPO_ROOT/scripts/guix_vm.sh" image > "$TEST_DIR/noflake-output" 2>&1
+noflake_rc=$?
+set -e
+if (( flake_accept_rc == 0 )) && grep -q "^system image .*$TEST_DIR#hurd64\$" "$TEST_DIR/flake-guix.calls" &&
+   [[ -f "$TEST_DIR/flake-guix/hurd64.base.qcow2" ]]; then
+    ok 'a non-goonix guix with the flake command builds a flake reference'
+else
+    not_ok 'a non-goonix guix with the flake command was refused for a flake reference'
+    sed 's/^/# /' "$TEST_DIR/flake-accept-output"
+    failures=1
+fi
+if (( flake_file_rc != 0 )) && grep -q 'is not goonix' "$TEST_DIR/flake-file-output" &&
+   ! grep -q '^system' "$TEST_DIR/flake-file.calls" 2>/dev/null; then
+    ok 'the same guix is refused for a file declaration'
+else
+    not_ok 'a non-goonix guix was accepted for a file declaration'
+    sed 's/^/# /' "$TEST_DIR/flake-file-output"
+    failures=1
+fi
+if (( noflake_rc != 0 )) && ! grep -q '^system' "$TEST_DIR/noflake-guix.calls" 2>/dev/null; then
+    ok 'a guix whose flake command fails is refused for a flake reference'
+else
+    not_ok 'a guix without a working flake command built a flake reference'
+    sed 's/^/# /' "$TEST_DIR/noflake-output"
     failures=1
 fi
 # A halt connection that hangs after the guest has shut down must not

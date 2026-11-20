@@ -92,8 +92,16 @@ need() {
 require_goonix() {
     local version
     version="$("$GUIX" --version 2>/dev/null | head -n 1)"
-    [[ "${GUIX_ANY_VERSION:-0}" == 1 || "$version" == *goonix* ]] || \
-        die "$GUIX is not goonix ($version); run this inside nix develop ./nix"
+    if [[ "${GUIX_ANY_VERSION:-0}" == 1 || "$version" == *goonix* ]]; then
+        return 0
+    fi
+    # A flake reference needs the goonix-only flake command. A guix built from
+    # the implementation worktree carries an upstream-style version string but
+    # has that command; accept it for a flake reference, not for a file.
+    if [[ "$GUIX_OS" == *#* ]] && "$GUIX" flake --help >/dev/null 2>&1; then
+        return 0
+    fi
+    die "$GUIX is not goonix ($version); run this inside nix develop ./nix"
 }
 
 # The process ID of the running QEMU, or nothing.
