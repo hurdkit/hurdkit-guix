@@ -7,8 +7,9 @@
 # Usage: ci_runner.sh <command> [arguments]
 #
 #   disk               pick an ext4 filesystem with CI_DISK_GB free and put
-#                      /gnu, /var/guix, the daemon's build directory and the
-#                      saved store (CI_STORE_CACHE) on it
+#                      /gnu, /var/guix, the daemon's build directory, the
+#                      saved store (CI_STORE_CACHE) and the images
+#                      (CI_WORK/release) on it
 #   kvm                let the runner's user open /dev/kvm
 #   install-nix        install Nix (NIX_VERSION, checked against
 #                      NIX_INSTALL_SHA256) as a multi-user daemon
@@ -106,7 +107,7 @@ cmd_disk() {
         work="$CI_ROOT/var/lib/hurdkit-ci"
     fi
     run mkdir -p "$work/gnu" "$work/var-guix" "$work/build" "$work/cache" \
-        "$CI_ROOT/gnu" "$CI_ROOT/var/guix"
+        "$work/release" "$CI_ROOT/gnu" "$CI_ROOT/var/guix"
     run chmod 755 "$work/build"
     # The daemon writes the translators of the Hurd image as gnu.*
     # extended attributes, which Linux accepts on ext4 only (G4).
@@ -114,7 +115,9 @@ cmd_disk() {
         die "$work/build is on $(fs_type "$work/build"), not ext4 (G4)"
     run mount --bind "$work/gnu" "$CI_ROOT/gnu"
     run mount --bind "$work/var-guix" "$CI_ROOT/var/guix"
-    run chown "$(id -u):$(id -g)" "$work/cache"
+    # $work is root's. The runner's own steps write the saved store to
+    # cache and the images to release (images.yml), so those two are its.
+    run chown "$(id -u):$(id -g)" "$work/cache" "$work/release"
     mkdir -p "$CI_STORE_CACHE"
     run mount --bind "$work/cache" "$CI_STORE_CACHE"
     say "working on $work ($(free_gb "$work") GiB free, $(fs_type "$work"))"
