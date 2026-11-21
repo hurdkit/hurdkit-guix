@@ -176,8 +176,8 @@ sets). The guests of this repository boot it; start one with `GUIX_CPUS`
 set to that bound, which `scripts/guix_vm.sh` passes to QEMU as `-smp`
 (empty means QEMU's default of one). To go back to one processor, name
 `gnumach-hurdkit` as a guest's `#:kernel`. Tickless idle
-(`--enable-tickless`) is a uniprocessor option of the same source and is
-not enabled.
+(`--enable-tickless`) is an option of the same source and is not
+enabled.
 
 `operating-system-with-hurd` from `(hurdkit system)` replaces the Hurd of a
 system: the boot servers, and also `pfinet`, the console, getty and login,
