@@ -16,7 +16,7 @@
   #:use-module (hurdkit packages hurd)
   #:use-module (hurdkit utils))
 
-(define %virtio-commit "c62096487e12fc4d6f370cddbe46a526289aa7e2")
+(define %virtio-commit "8e5fe7415e7b8fc6266b6adf6392fabd3c2b808e")
 
 ;; These are source/header inputs to a cross build, not a native Hurd toolchain.
 ;; In particular the Hurd core-header union contains the .defs consumed by MIG.
@@ -70,7 +70,7 @@ directory is the one of Hurdkit's Hurd.")
              (commit %virtio-commit)))
        (file-name (git-file-name name version))
        (sha256
-        (base32 "0j2zs0lcmn4zqq96fdxpfsbm26442hlkhpwfcy9ilz4xjfd02a7h"))))
+        (base32 "1j8gajvl9h11kiyi8jnjl12nn8lradicxnrawsh118p0mqgcrpiw"))))
     (build-system gnu-build-system)
     (arguments
      (list
@@ -173,7 +173,7 @@ by a 9P2000.L server, such as QEMU's virtio-9p device.")
 ;; the hash here, then adapt guix_virtio_test.sh to what they expect.
 ;; (hurdkit packages tests) builds Hurdkit's test programs from the same
 ;; checkout.
-(define %matrices-commit "c3ef87d57d2bc6320168f4471b234c63b72a7317")
+(define %matrices-commit "f73ae56777e803cc9fc9042c4d0cb0e4ff984fc5")
 
 (define-public hurdkit-virtio-matrices
   (package
@@ -187,7 +187,7 @@ by a 9P2000.L server, such as QEMU's virtio-9p device.")
              (commit %matrices-commit)))
        (file-name (git-file-name name version))
        (sha256
-        (base32 "1q231c9ysh3spnqlhd7i71a9bab2sdhpbxvi8zwfwxs6l13jbpkr"))))
+        (base32 "0072fmjiy2bp2mynxn85dich6ppp3yasjyym0hviqdmm24l7dqpv"))))
     (build-system copy-build-system)
     (arguments
      (list #:install-plan
