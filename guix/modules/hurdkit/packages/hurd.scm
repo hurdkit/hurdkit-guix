@@ -10,7 +10,7 @@
 ;; Both come from the "hurdkit" branch of Hurdkit's copy of the project.
 ;; Guix needs fixed commits and hashes: these two are pins of this module
 ;; alone, moved forward by hand (commit and base32 hash together).
-(define %gnumach-hurdkit-commit "b30878074babde1d042236d95a914cfa3156c619")
+(define %gnumach-hurdkit-commit "c25fcc3c86c346d137edf1bc80b55992a024aec5")
 (define %hurd-hurdkit-commit "f26d287cc854c9b423e62ace92e39e1e2356ae5e")
 
 (define-public gnumach-hurdkit
@@ -26,14 +26,14 @@
              (commit %gnumach-hurdkit-commit)))
        (file-name (git-file-name "gnumach-hurdkit" version))
        (sha256
-        (base32 "1c4aivb8jw21zghccyqxqk5ckv69wjzbc5wdrafmvyfy51fbql6g"))))
+        (base32 "0rvil4zgfsby7j4ignzlmanw95rdxk8jf14xbfkb04ykqqbvig21"))))
     (synopsis "GNU Mach from Hurdkit's branch, at a pinned commit")))
 
 ;; The same source built for several processors. The number is a
 ;; compile-time upper bound; Hurdkit's own harness builds and boots this
 ;; kernel with as many processors as the bound, and so do our guests
-;; (GUIX_CPUS in the Makefile). Tickless idle (--enable-tickless) is a
-;; uniprocessor option of the same source and is left off.
+;; (GUIX_CPUS in the Makefile). Tickless idle (--enable-tickless) is an
+;; option of the same source and is left off.
 (define %gnumach-smp-cpus 2)
 
 (define-public gnumach-hurdkit-smp
