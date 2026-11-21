@@ -1,26 +1,34 @@
 #!/usr/bin/env bash
-# TAP: 'guix shell' in hurdkit enters shells.default.  Runs the implementation
-# tree's guix (GUIX, default: the goonix of the implementation worktree through
-# pre-inst-env) in a scratch copy of this flake, enters the default shell, and
-# checks that the environment entered is shells.default's profile:
+# TAP: 'guix shell' in hurdkit enters shells.default.  Runs GUIX (default:
+# 'guix' on PATH, the goonix-flake.t convention) in a scratch copy of this
+# flake, enters the default shell, and checks that the environment entered is
+# shells.default's profile:
 #   - $GUIX_ENVIRONMENT equals the profile the shell reference resolves to
 #     (evaluate-flake-shell, the same resolution 'guix shell' uses; no build);
 #   - the packages shells.default lists (qemu, openssh) are on PATH FROM that
 #     profile, not from the host.
 # Nothing here builds a system or runs 'flake show'.  The shell profile itself
 # is built (it is what 'guix shell' enters); the resolution is eval-only.
+#
+# This gate needs the goonix of the IMPLEMENTATION worktree (it has the flake
+# evaluator and the shell hook).  The host's pinned guix does not, and with it
+# the test SKIPS — a skip is not a pass.  To run the gate, point GUIX and GUILE
+# at the implementation tree, e.g. wrappers that exec
+#   <implementation>/pre-inst-env guix "$@"   (GUIX)
+#   <implementation>/pre-inst-env guile "$@"  (GUILE)
+# and run through heavy-turn.sh under a memory cap.  GUILE must carry the same
+# load path as GUIX: the resolve helper loads the guix modules.
 set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 GUIX="${GUIX:-guix}"
 # The resolve helper needs the implementation tree's Guile load path (guix
-# modules).  GUILE defaults to the guile that GUIX's pre-inst-env would use;
-# set GUILE to a wrapper that runs 'pre-inst-env guile' when GUIX is the
-# implementation tree's guix.
+# modules).  GUILE defaults to 'guile' on PATH; set it to a wrapper that runs
+# 'pre-inst-env guile' alongside GUIX (see the header).
 GUILE="${GUILE:-guile}"
 export GUILE_AUTO_COMPILE=0
 if ! "$GUIX" flake --help >/dev/null 2>&1; then
-    echo '1..0 # SKIP this goonix has no flake evaluator'
+    echo '1..0 # SKIP this goonix has no flake evaluator (set GUIX/GUILE to the implementation worktree; a skip is not a pass)'
     exit 0
 fi
 if ! "$GUIX" shell --help >/dev/null 2>&1; then
