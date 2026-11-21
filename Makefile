@@ -1,7 +1,7 @@
 # Guix GNU/Hurd (x86_64-gnu) guests.
 #
 # The plain guest is declared in guix/hurd64.scm. Run these targets inside
-# "nix develop ./nix": the guix command has to be the pinned goonix.
+# "nix develop": the guix command has to be the pinned goonix.
 # See skills/GUIX.md.
 
 .DEFAULT_GOAL := help

@@ -7,8 +7,8 @@ Use this skill for work on the Guix guest (`guix/`, `Makefile`,
 
 ## Inputs
 
-- `flake.scm` and `flake.lock`: the Guix flake outputs and their lock. The
-  Nix bootstrap is under `nix/` (`nix/flake.nix`, `nix/flake.lock`), the
+- `flake.scm` and `guix.lock`: the Guix flake outputs and their lock. The
+  Nix bootstrap is at the top (`flake.nix`, `flake.lock`), the
   development shell with goonix (our fork of GNU Guix) at a pinned commit,
   because the two lock formats are different.
 - `guix/hurd64.scm`: the system declaration of the guest, which is
@@ -16,7 +16,7 @@ Use this skill for work on the Guix guest (`guix/`, `Makefile`,
 - `guix/hurd64-release.scm`, `guix/hurd64-hurdkit-release.scm`: the
   released images (see "Release images").
 - `guix/goonix.scm`: goonix as the guest's own Guix (same commit as
-  `nix/flake.lock`).
+  `flake.lock`).
 - `Makefile`: the make targets of the guests.
 - `scripts/guix_vm.sh`: builds, boots and manages the guest.
 - `scripts/guix_release.sh`, `scripts/ci_runner.sh`,
@@ -54,14 +54,14 @@ with key-based SSH.
 
 ### Build the image
 
-Host, shell and guest all run goonix at the commit that `nix/flake.lock`
+Host, shell and guest all run goonix at the commit that `flake.lock`
 pins: the host's daemon (see "Host daemon"), the `guix` command of the
-`nix develop ./nix` shell, and the guest's Guix through
+`nix develop` shell, and the guest's Guix through
 `guix/goonix.scm`. Run every Guix command in that shell and never run
 `guix pull` for this work.
 
 ```sh
-nix develop ./nix
+nix develop
 make guix-image
 # Or evaluate and build the same guest through the Guix flake:
 make GUIX_OS=.#hurd64 guix-image
@@ -101,7 +101,7 @@ The guest's `guix --version` prints the same goonix line as on the host.
 
 The host's Guix daemon has to be goonix too. On NixOS, with goonix as an
 input of the system flake (`goonix.url = "github:hurdkit/goonix/goonix";`,
-locked at the commit `nix/flake.lock` pins; goonix's `main` branch mirrors
+locked at the commit `flake.lock` pins; goonix's `main` branch mirrors
 upstream Guix, its `goonix` branch has the fork):
 
 ```nix
@@ -115,7 +115,7 @@ guix-daemon.socket`. If the service restarted before its socket ("Socket
 service guix-daemon.service already active, refusing"), run `systemctl stop
 guix-daemon.service` and `systemctl start guix-daemon.socket`.
 
-To move the goonix pin, update `nix/flake.lock` (`nix flake update goonix`),
+To move the goonix pin, update `flake.lock` (`nix flake update goonix`),
 the system flake's lock, and `%goonix-commit` with its hash in
 `guix/goonix.scm`; `tests/goonix-pin.t` compares the last two.
 
@@ -454,7 +454,7 @@ describes a disk that no longer exists and the guest sees a corrupt
 filesystem. Copy what you need out with `scp`, then `make guix-reset-state`.
 
 **G9. Nix only sees files that git knows.** After editing `flake.nix`,
-`git add` it before `nix develop ./nix`. (Guix reads `guix/` from the working
+`git add` it before `nix develop`. (Guix reads `guix/` from the working
 directory, so this does not apply there.)
 
 **G10. The store image is read-only and compressed.** `guix_vm.sh image`
@@ -466,7 +466,7 @@ boot the store file without `-snapshot`.
 content. Set `GUIX_IMAGE_OPTS=--image-size=8G` when you need room.
 
 **G13. Parallel heavy jobs make everything look hung.** Building goonix or
-an image while a guest runs saturates the disk, and `nix develop ./nix` waits
+an image while a guest runs saturates the disk, and `nix develop` waits
 silently on a store lock. Run heavy steps one after another; `cat
 /proc/pressure/io` shows whether the disk is the bottleneck.
 
@@ -527,7 +527,7 @@ password at all; `guix_vm.sh` needs `GUIX_LOGIN=empty-password` for it.
 
 ## Verification
 
-Run these in `nix develop ./nix`. Each command exits with zero status
+Run these in `nix develop`. Each command exits with zero status
 when its checks pass and prints what failed otherwise.
 
 | Check | Command |

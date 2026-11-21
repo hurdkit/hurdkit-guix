@@ -22,7 +22,7 @@ moves only when someone moves it.
 ## Quick start
 
 ```sh
-nix develop ./nix         # the pinned goonix and the host tools
+nix develop         # the pinned goonix and the host tools
 make guix-test               # scripts and declarations; boots nothing
 make guix-image guix-start   # build the plain guest, boot it, wait for SSH
 make guix-ssh                # a root shell in it
@@ -46,8 +46,8 @@ section of the guide says how they are built and checked.
 ## Layout
 
 ```
-nix/flake.nix, nix/flake.lock # development shell with goonix at a pinned commit
-flake.scm, flake.lock    # Guix flake outputs and their lock
+flake.nix, flake.lock # development shell with goonix at a pinned commit
+flake.scm, guix.lock    # Guix flake outputs and their lock
 .github/workflows/      # the release images and the tests on GitHub
 Makefile                # the make targets
 guix/                   # system declarations, package modules, patches

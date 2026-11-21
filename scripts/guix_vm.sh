@@ -89,7 +89,7 @@ need() {
     command -v "$1" >/dev/null 2>&1 || die "$1 is required but not in PATH"
 }
 
-# The image has to be built by goonix, the Guix that nix/flake.lock pins:
+# The image has to be built by goonix, the Guix that flake.lock pins:
 # another Guix (for example an upstream one installed with "guix pull")
 # evaluates a different package graph, and the image is then not the one
 # this repository declares. GUIX_ANY_VERSION=1 skips the check.
@@ -105,7 +105,7 @@ require_goonix() {
     if [[ "$GUIX_OS" == *#* ]] && "$GUIX" flake --help >/dev/null 2>&1; then
         return 0
     fi
-    die "$GUIX is not goonix ($version); run this inside nix develop ./nix"
+    die "$GUIX is not goonix ($version); run this inside nix develop"
 }
 
 # The process ID of the running QEMU, or nothing.

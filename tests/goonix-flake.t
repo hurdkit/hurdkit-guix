@@ -93,8 +93,8 @@ fi
 check 'the host public key option contains no private key' \
     bash -c '! grep -Eq "PRIVATE KEY|AGE-SECRET-KEY-" "$1"' _ flake.local.scm
 check 'the Guix lock is separate from the Nix bootstrap lock' \
-    bash -c 'grep -q "^(flake-lock" "$1" && grep -q '"'"'\"nodes\"'"'"' "$2"' _ flake.lock nix/flake.lock
-check 'the lock is stable' bash -c 'cp "$1" "$2" && "$3" flake lock >/dev/null && cmp "$1" "$2"' _ flake.lock "$work/lock" "$GUIX"
+    bash -c 'grep -q "^(flake-lock" "$1" && grep -q '"'"'\"nodes\"'"'"' "$2"' _ guix.lock flake.lock
+check 'the lock is stable' bash -c 'cp "$1" "$2" && "$3" flake lock >/dev/null && cmp "$1" "$2"' _ guix.lock "$work/lock" "$GUIX"
 check 'the flake image evaluates in its container' bash -c '
     "$1" system image -d .#hurd64 >"$2"' _ "$GUIX" "$work/image"
 check 'the image output is a real derivation' bash -c '
@@ -126,7 +126,7 @@ check 'an explicit key option takes precedence over local options' bash -c '
     cmp "$2/image" "$2/precedence-image" || exit' _ "$GUIX" "$work"
 check 'the flake replaces only the declaration keys' bash -c '
     mkdir "$2/reference" || exit
-    cp flake.lock "$2/reference/flake.lock"
+    cp guix.lock "$2/reference/guix.lock"
     cp flake.local.scm "$2/reference/flake.local.scm"
     cp -a guix "$2/reference/guix"
     git -C "$2/reference" init -q
