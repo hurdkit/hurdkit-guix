@@ -1,0 +1,53 @@
+# goonix for nix develop, built once per flake.nix and flake.lock and kept
+# in the Actions cache as a Nix binary cache: the paths of the development
+# shell that cache.nixos.org lacks, with their closures. images.yml and
+# guests.yml call this workflow; their jobs restore the cache with the key
+# it outputs. skills/GUIX.md, "Release images", says how the caches fit
+# together.
+name: goonix
+
+on:
+  workflow_call:
+    outputs:
+      key:
+        description: The Actions cache key of goonix's binary cache
+        value: ${{ jobs.goonix.outputs.key }}
+
+permissions:
+  contents: read
+
+jobs:
+  goonix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cache key
+        id: key
+        run: echo "key=nix-goonix-v1-${{ hashFiles('flake.nix', 'flake.lock') }}" >> "$GITHUB_OUTPUT"
+      - name: Look for goonix in the cache
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hurdkit-ci/nix
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+      - name: Install Nix
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash scripts/ci_runner.sh install-nix
+      - name: Build goonix and the development shell
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: nix develop --command guix --version
+      - name: Export goonix
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash scripts/ci_runner.sh nix-cache-export ~/.cache/hurdkit-ci/nix
+      - name: Save goonix
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hurdkit-ci/nix
+          key: ${{ steps.key.outputs.key }}

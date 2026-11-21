@@ -17,7 +17,8 @@ Use this skill for work on the Guix guest (`guix/`, `Makefile`,
 - `Makefile`: the make targets of the guests.
 - `scripts/guix_vm.sh`: builds, boots and manages the guest.
 - `scripts/guix_release.sh`, `scripts/ci_runner.sh`,
-  `.github/workflows/`: the released images and their pipeline.
+  `.github/workflows/`: the released images and their pipeline, and the
+  test guests in CI (see "Release images" and "Guest tests in CI").
 - `img/guix/`: the base image, overlays and logs of the guest.
 - `img/keys/`: the SSH keys of the guest's root and peon accounts.
 
@@ -64,7 +65,8 @@ guix system image --image-type=hurd64-qcow2 guix/hurd64.scm
 
 The declaration reads the accounts' public keys from `img/keys/`
 (`root_ed25519.pub`, `peon_ed25519.pub`); `ssh-keygen -q -t ed25519 -N ''
--f img/keys/root_ed25519` creates a missing pair.
+-f img/keys/root_ed25519` creates a missing pair, and `bash
+scripts/guix_vm.sh keys` every missing one.
 
 `guix system image` prints the image in the store: a read-only, compressed
 qcow2. The first build on a machine cross-compiles goonix for the guest;
@@ -232,10 +234,10 @@ RELEASE_TAG=TAG bash scripts/guix_release.sh notes img/release > img/release/not
 The workflow `.github/workflows/images.yml` runs these on GitHub's hosted
 runners:
 
-1. Job `goonix` builds goonix with Nix once per `flake.nix` and
-   `flake.lock`, and keeps the paths of the development shell that
-   cache.nixos.org lacks, with their closures, as a Nix binary cache in the
-   Actions cache.
+1. Job `goonix` (`.github/workflows/goonix.yml`, which `guests.yml` calls
+   too) builds goonix with Nix once per `flake.nix` and `flake.lock`, and
+   keeps the paths of the development shell that cache.nixos.org lacks,
+   with their closures, as a Nix binary cache in the Actions cache.
 2. Job `images`: `scripts/ci_runner.sh` puts `/gnu`, `/var/guix` and the
    daemon's build directory on an ext4 disk (G4), opens `/dev/kvm`,
    installs Nix at the version and checksum it pins, and starts goonix's
@@ -260,12 +262,80 @@ downloads from the farms and cross-builds goonix again, within the job's
 time limit; `prefetch` saves what it got when it is stopped.
 
 `.github/workflows/test.yml` runs `make guix-test` and shellcheck of the
-release scripts for pull requests and pushes to `main`; it builds nothing,
-and the tests that need goonix skip.
+scripts that CI runs, for pull requests and pushes to `main`; it builds
+nothing, and the tests that need goonix skip there (`guests.yml` runs them
+with goonix).
 
 To release: push to `main`, wait for the `images` run of that commit to
 pass, then push a tag whose name starts with `v`: `git tag TAG && git push
 origin TAG`.
+
+### Guest tests in CI
+
+`.github/workflows/guests.yml` runs the checks of the test guests on
+GitHub's hosted runners, each check in its own job, as `make` runs it on a
+workstation:
+
+- `make guix-test` with goonix and its daemon, so that the tests that
+  `test.yml` skips run;
+- the plain guest (`guix/hurd64.scm`): `make guix-image`, then
+  `guix-start guix-ssh-peon guix-stop`, then `stage0-check` with
+  `STAGE0_GPUS` empty;
+- `make stage1-check` and `make stage2-check`;
+- `make guix-virtio-test`, `guix-virtio-balloon-test`,
+  `guix-virtio-blk-test` and `guix-virtio-net-test`.
+
+It runs for every pull request, for pushes to `main` that touch the
+flake, the `Makefile`, `guix/`, `scripts/`, `tests/` or these workflows
+(the path filter of its push trigger), by hand, and on the schedule in the
+workflow, for the same reasons as `images.yml`.
+
+1. Job `changes` decides whether the guests are to be checked: for a pull
+   request, when a file that it changes against its base matches the path
+   filter of the push trigger (`scripts/ci_guests.sh touches`); for the
+   other events, always. The jobs that follow run only then.
+2. Job `goonix`, as for the images.
+3. Job `store`, not for pull requests: the newest saved store of the test
+   guests comes from the Actions cache (the store of `images.yml` the first
+   time), `guix_vm.sh keys` makes the accounts' keys that the declarations
+   read, and `guix_release.sh prefetch` with the declarations of the test
+   guests builds what they need but their images. Its gate is the one of
+   the images (G2): the farms have to provide every package but goonix,
+   this repository's own and their sources. The host side of the checks
+   (the driver matrices, the programs that render `stage2-check`'s
+   reference) is built too. The store is saved when it changed, also after
+   a failure or a timeout.
+4. Job `check`, one per check: the runner as for the images, but it fails
+   without a usable `/dev/kvm` (`ci_runner.sh kvm --require`); the store
+   that `store` saved; `prefetch` for the check's guest; then the check.
+   A failed check keeps the serial logs, QEMU traces and frames of its
+   guests as an artifact of the run; never `img/keys/`, whose keys are
+   made on the runner and go with it.
+5. Job `guests` runs last, whatever happened before it
+   (`scripts/ci_guests.sh verdict`): it fails when a job failed, was
+   cancelled, or did not run although the guests are touched, and passes
+   when every job passed or none had to run.
+
+Branch protection requires two checks: `guests`, this last job, and
+`test`, the job of `test.yml`, which has no path filter. It must not
+require the checks of the matrix by their names: when the pull request
+does not touch the guests, the matrix is skipped and GitHub reports one
+check under the unexpanded name of the job, so a required check named
+after one of them would wait forever.
+
+A pull request saves no store: its checks start from the store of `main`
+and each builds what the pull request changes. The caches of pull requests
+would push those of `main` out of the repository's cache space.
+
+What CI does not run:
+
+- the Linux reference half of `stage0-check`: it renders through virgl and
+  Venus on an AMD or NVIDIA GPU of the host, and the hosted runners have no
+  GPU;
+- a clean halt after 9pfs (G20): `guix_virtio_test.sh` exits with status 3
+  when the matrix passed but the guest did not halt cleanly, and the
+  `guix-virtio-test` job reports that as a warning. A failed matrix fails
+  the job.
 
 ### niri platform guest
 
@@ -394,7 +464,8 @@ accelerated scanout. `make stage0-check` is the live gate: the Hurd guest
 boots and stops cleanly, and for each GPU in `STAGE0_GPUS` and path (virgl,
 and Venus for `STAGE0_VENUS_GPUS`) the reference reports that GPU as
 renderer, runs glmark2, takes screenshots, opens foot by QMP keys and stops
-cleanly. Artifacts go to `img/stage0/`.
+cleanly. With `STAGE0_GPUS` empty it checks the Hurd guest alone, as CI
+does. Artifacts go to `img/stage0/`.
 
 ## Pitfalls
 
@@ -485,8 +556,9 @@ to QEMU therefore live in `$XDG_RUNTIME_DIR`, named after the SSH port.
 which a 9pfs translator ran, sshd stops on `halt` but GNU Mach's shutdown
 marker often never comes, also after `settrans -g`. The cause is not known.
 `guix_vm.sh stop` then stops QEMU and exits nonzero, so `make
-guix-virtio-test` fails at that point even when its matrix passed; with a
-kept state, run `make guix-repair` before the next persistent boot.
+guix-virtio-test` fails at that point even when its matrix passed
+(`guix_virtio_test.sh` exits with status 3 then); with a kept state, run
+`make guix-repair` before the next persistent boot.
 
 **G22. The guest has no swap.** Pages that GNU Mach evicts under memory
 pressure go to the default pager, which has nowhere to write them: the

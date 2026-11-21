@@ -1,0 +1,325 @@
+# The test guests and their checks on GitHub's hosted runners, each check
+# on its own runner with KVM: make guix-test with goonix (the tests that
+# test.yml skips), the Hurd half of stage0-check, stage1-check (tmpfs-shm,
+# the epoll shim's suites, the Rust programs), stage2-check (libwayland's
+# tests and the rendering against a reference made on the runner), and the
+# virtio driver matrices of guix-virtio-test, guix-virtio-balloon-test,
+# guix-virtio-blk-test and guix-virtio-net-test. skills/GUIX.md, "Guest
+# tests in CI", says how the jobs and caches fit together.
+#
+# Not run here:
+# - the Linux reference half of stage0-check (STAGE0_GPUS): it renders
+#   through virgl and Venus on an AMD or NVIDIA GPU of the host, and the
+#   hosted runners have no GPU. The Hurd half runs, with STAGE0_GPUS empty.
+#
+# Branch protection requires the last job, guests, and none of the others:
+# see there.
+name: guests
+
+on:
+  # Every pull request, so that the required check always reports. The job
+  # changes decides whether one touches the guests: the paths of the push
+  # trigger below, which are written only there.
+  pull_request:
+  # Pushes to main that touch the guests, the scripts that build and test
+  # them, or their tests.
+  push:
+    branches: [main]
+    paths:
+      - flake.nix
+      - flake.lock
+      - Makefile
+      - guix/**
+      - scripts/**
+      - tests/**
+      - .github/workflows/guests.yml
+      - .github/workflows/goonix.yml
+  workflow_dispatch:
+  # On a schedule, as images.yml: the caches are read before GitHub evicts
+  # caches that nobody read, and a farm, pin or driver that broke shows
+  # without a push.
+  schedule:
+    - cron: '53 4 * * 1,4'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guests-${{ github.ref }}
+  # A new push to a pull request replaces its run; runs of main finish, so
+  # that the store they build is saved.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The test guests, whose packages the store job builds.
+  GUEST_SYSTEMS: guix/hurd64.scm guix/hurd64-platform.scm guix/hurd64-drivers.scm guix/hurd64-wayland.scm
+
+jobs:
+  # Whether the guests have to be checked: for a pull request, when a file
+  # it changes matches a path of the push trigger
+  # (scripts/ci_guests.sh touches); otherwise always, since pushes to main
+  # are filtered already.
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      guests: ${{ steps.touches.outputs.guests }}
+    steps:
+      # The whole history, so that the base of a pull request is in it.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Does it touch the guests?
+        id: touches
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ "$EVENT" == pull_request ]]; then
+            guests="$(bash scripts/ci_guests.sh touches "$BASE")"
+          else
+            guests=true
+          fi
+          echo "guests: $guests"
+          echo "guests=$guests" >> "$GITHUB_OUTPUT"
+
+  goonix:
+    needs: changes
+    if: needs.changes.outputs.guests == 'true'
+    uses: ./.github/workflows/goonix.yml
+
+  # Everything the test guests need but their images, built from the
+  # newest store of the guests (or of images.yml, the first time) and kept
+  # in the Actions cache. Pull requests skip it and do not save a store:
+  # their checks start from the store of main and build what they change,
+  # and their caches would push those of main out of the repository's
+  # cache space.
+  store:
+    needs: [changes, goonix]
+    if: needs.changes.outputs.guests == 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Disk
+        run: bash scripts/ci_runner.sh disk
+      - name: Install Nix
+        run: bash scripts/ci_runner.sh install-nix
+      - name: Restore goonix
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hurdkit-ci/nix
+          key: ${{ needs.goonix.outputs.key }}
+          fail-on-cache-miss: true
+      - name: Development shell (G1)
+        run: nix develop --command guix --version
+      - name: Build users
+        run: bash scripts/ci_runner.sh guix-users
+      - name: Restore the Guix store
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hurdkit-ci/store
+          key: guix-guests-v1-${{ hashFiles('flake.lock', 'guix/**', 'tests/graphics/**', 'tests/rust/**') }}-${{ github.run_id }}
+          restore-keys: |
+            guix-guests-v1-${{ hashFiles('flake.lock', 'guix/**', 'tests/graphics/**', 'tests/rust/**') }}-
+            guix-guests-v1-
+            guix-store-v1-
+      - name: Unpack the Guix store
+        run: |
+          bash scripts/ci_runner.sh store-restore ~/.cache/hurdkit-ci/store/guix-store.tar.zst
+          echo "STORE_BEFORE=$(bash scripts/ci_runner.sh store-fingerprint)" >> "$GITHUB_ENV"
+      - name: Start the Guix daemon
+        id: daemon
+        run: nix develop --command bash scripts/ci_runner.sh guix-daemon
+      # The declarations read the accounts' public keys; these are made for
+      # this runner and thrown away with it.
+      - name: SSH keys of the guests
+        run: nix develop --command bash scripts/guix_vm.sh keys
+      - name: Build what the guests need (G2 gate)
+        timeout-minutes: 300
+        # GUEST_SYSTEMS is a list of words.
+        run: |
+          # shellcheck disable=SC2086
+          nix develop --command bash scripts/guix_release.sh prefetch $GUEST_SYSTEMS
+      # What the checks build on the host: the driver matrices, and the
+      # programs that render stage2-check's reference.
+      - name: Build the host side of the checks
+        timeout-minutes: 60
+        run: nix develop --command guix build -L guix/modules hurdkit-virtio-matrices hurdkit-graphics-tests
+      # Saved also when a step above failed or timed out, so that the next
+      # run goes on from here; not saved when nothing changed.
+      - name: Pack the Guix store
+        id: pack
+        if: always() && steps.daemon.outcome == 'success'
+        run: |
+          bash scripts/ci_runner.sh guix-stop
+          if [[ "$(bash scripts/ci_runner.sh store-fingerprint)" != "$STORE_BEFORE" ]]; then
+            bash scripts/ci_runner.sh store-save ~/.cache/hurdkit-ci/store/guix-store.tar.zst
+            echo "save=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the Guix store
+        if: always() && steps.pack.outputs.save == 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hurdkit-ci/store
+          key: guix-guests-v1-${{ hashFiles('flake.lock', 'guix/**', 'tests/graphics/**', 'tests/rust/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  # One runner per check. Each restores the store that the store job saved
+  # (or the newest one), builds its guest's image and what is still
+  # missing, and runs the check as make runs it on a workstation.
+  check:
+    name: ${{ matrix.check }}
+    needs: [changes, goonix, store]
+    if: >-
+      !cancelled() && needs.changes.outputs.guests == 'true' &&
+      needs.goonix.result == 'success' &&
+      (needs.store.result == 'success' || needs.store.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: guix-test
+            run: make guix-test
+            minutes: 30
+          - check: stage0-check
+            declaration: guix/hurd64.scm
+            # The guest boots, answers and halts, then stage0-check without
+            # the GPUs of the Linux reference.
+            run: |
+              make guix-image
+              make guix-start guix-ssh-peon guix-stop GUIX_SSH_COMMAND=true
+              STAGE0_GPUS= make stage0-check
+            minutes: 30
+          - check: stage1-check
+            declaration: guix/hurd64-platform.scm
+            run: make stage1-check
+            minutes: 90
+          - check: stage2-check
+            declaration: guix/hurd64-wayland.scm
+            run: make stage2-check
+            minutes: 90
+          - check: guix-virtio-test
+            declaration: guix/hurd64-drivers.scm
+            # After 9pfs was used the guest often does not halt cleanly
+            # (G20): guix_virtio_test.sh then exits with 3, which is a
+            # warning here. A failed matrix fails the check.
+            run: |
+              rc=0
+              bash scripts/guix_virtio_test.sh 9p || rc=$?
+              if (( rc == 3 )); then
+                echo "::warning::the 9p matrix passed, but the guest did not halt cleanly (G20)"
+                rc=0
+              fi
+              exit "$rc"
+            minutes: 60
+          - check: guix-virtio-balloon-test
+            declaration: guix/hurd64-drivers.scm
+            run: make guix-virtio-balloon-test
+            minutes: 60
+          - check: guix-virtio-blk-test
+            declaration: guix/hurd64-drivers.scm
+            run: make guix-virtio-blk-test
+            minutes: 60
+          - check: guix-virtio-net-test
+            declaration: guix/hurd64-drivers.scm
+            run: make guix-virtio-net-test
+            minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Disk
+        run: bash scripts/ci_runner.sh disk
+      # Without KVM a guest boots in many minutes and the timing checks of
+      # stage2-check fail; such a runner fails here instead.
+      - name: KVM
+        if: matrix.declaration
+        run: bash scripts/ci_runner.sh kvm --require
+      - name: Install Nix
+        run: bash scripts/ci_runner.sh install-nix
+      - name: Restore goonix
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hurdkit-ci/nix
+          key: ${{ needs.goonix.outputs.key }}
+          fail-on-cache-miss: true
+      - name: Development shell (G1)
+        run: nix develop --command guix --version
+      - name: Build users
+        run: bash scripts/ci_runner.sh guix-users
+      - name: Restore the Guix store
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hurdkit-ci/store
+          key: guix-guests-v1-${{ hashFiles('flake.lock', 'guix/**', 'tests/graphics/**', 'tests/rust/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            guix-guests-v1-${{ hashFiles('flake.lock', 'guix/**', 'tests/graphics/**', 'tests/rust/**') }}-
+            guix-guests-v1-
+            guix-store-v1-
+      - name: Unpack the Guix store
+        run: bash scripts/ci_runner.sh store-restore ~/.cache/hurdkit-ci/store/guix-store.tar.zst
+      - name: Start the Guix daemon
+        run: nix develop --command bash scripts/ci_runner.sh guix-daemon
+      - name: SSH keys of the guests
+        run: nix develop --command bash scripts/guix_vm.sh keys
+      # Nothing to build after the store job; in a pull request, what it
+      # changes. The check builds the image itself.
+      - name: Build the guest (G2 gate)
+        if: matrix.declaration
+        timeout-minutes: 240
+        env:
+          DECLARATION: ${{ matrix.declaration }}
+        run: nix develop --command bash scripts/guix_release.sh prefetch "$DECLARATION"
+      - name: ${{ matrix.check }}
+        timeout-minutes: ${{ matrix.minutes }}
+        env:
+          RUN: ${{ matrix.run }}
+        run: nix develop --command bash -eo pipefail -c "$RUN"
+      # The serial logs, QEMU traces, frames and results of a failed check;
+      # not img/keys.
+      - name: Logs of the guests
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: logs-${{ matrix.check }}
+          path: |
+            img/guix*/serial*.log
+            img/guix*/*.trace
+            img/guix-wayland/reference
+            img/guix-wayland/results
+            img/stage0
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The check that branch protection requires, under this job's name,
+  # guests. It reports on every pull request: it passes when the jobs above
+  # passed, or were skipped because the pull request does not touch the
+  # guests, and fails when one of them failed, was cancelled, or did not
+  # run although the guests are touched (scripts/ci_guests.sh verdict).
+  # The checks of the matrix are not to be required by their names: when
+  # the matrix is skipped, GitHub reports one check under the unexpanded
+  # name of the job, and a required check of another name would wait
+  # forever.
+  guests:
+    needs: [changes, goonix, store, check]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verdict
+        env:
+          EVENT: ${{ github.event_name }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          GUESTS: ${{ needs.changes.outputs.guests }}
+          GOONIX_RESULT: ${{ needs.goonix.result }}
+          STORE_RESULT: ${{ needs.store.result }}
+          CHECK_RESULT: ${{ needs.check.result }}
+        run: bash scripts/ci_guests.sh verdict

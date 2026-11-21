@@ -7,10 +7,12 @@
 #
 # Usage: guix_release.sh <command> [arguments]
 #
-#   check              say what building the images would build and download;
+#   check [DECLARATION...]
+#                      say what building the images would build and download;
 #                      fail when that includes a package other than goonix
 #                      and this repository's own (pitfall G2)
-#   prefetch           build or download everything the images need, but not
+#   prefetch [DECLARATION...]
+#                      build or download everything the images need, but not
 #                      the images themselves
 #   build DIR          build the images into DIR as NAME-TAG.qcow2, check
 #                      that no builder key is in them, write DIR/SHA256SUMS
@@ -22,6 +24,10 @@
 #   notes DIR          print the release notes of the images in DIR
 #   publish DIR        create the GitHub release RELEASE_TAG from DIR with gh,
 #                      or replace the files of an existing one
+#
+# check and prefetch take the declarations of RELEASE_SYSTEMS, or the
+# declarations they are given: the test guests of guests.yml go through the
+# same gate.
 #
 # Every setting below can be overridden from the environment.
 
@@ -106,16 +112,22 @@ drv_outputs() {
 }
 
 # The packages that are expected to be built here: goonix (guix/goonix.scm)
-# and this repository's own packages (guix/modules), one name per line.
+# and this repository's own packages (guix/modules), by the names of their
+# variables and of the packages, one name per line. Some packages of
+# guix/modules are not exported, such as the Rust standard library for
+# the Hurd.
 own_packages() {
     echo goonix
-    sed -n 's/^(define-public \([a-z0-9-]*\)\( .*\)\{0,1\}$/\1/p' \
+    sed -n -e 's/^(define-public \([a-z0-9-]*\)\( .*\)\{0,1\}$/\1/p' \
+        -e 's/^ *(name "\([a-z0-9-]*\)")$/\1/p' \
         "$REPO_ROOT"/guix/modules/hurdkit/packages/*.scm | grep -v '^%' | sort -u
 }
 
 # classify DRV: "cheap" for what Guix always makes here (system files,
-# grafts, profile hooks and the image itself), "own" for a package of
-# own_packages or its source checkout, "foreign" for any other package.
+# grafts, profile hooks and the image itself), "source" for a download (a
+# fixed-output derivation) or a source archive that Guix unpacks, patches
+# and packs again, "own" for a package of own_packages or its source
+# checkout, "foreign" for any other package. A source compiles nothing.
 classify() {
     local drv="$1" name package
     name="$(basename "$drv" .drv)"
@@ -124,19 +136,28 @@ classify() {
         echo cheap
         return
     fi
+    # The first output of a fixed-output derivation names its hash
+    # algorithm; a patched source is named NAME-VERSION.tar.EXTENSION.
+    if grep -q '^Derive(\[("out","[^"]*","[^"]' "$drv" || [[ "$name" == *.tar.* ]]; then
+        echo source
+        return
+    fi
     # Packages are NAME-VERSION; system files and image parts have no
     # version.
     if [[ ! "$name" =~ -[0-9] ]]; then
         echo cheap
         return
     fi
-    package="$(sed -E 's/-[0-9].*//' <<<"$name")"
+    # The version starts with a digit, but so may a part of the name
+    # (hurd-9pfs): the names of our packages are tried as prefixes.
     [[ -n "${OWN_PACKAGES:-}" ]] || OWN_PACKAGES="$(own_packages)"
-    if grep -qx -- "$package" <<<"$OWN_PACKAGES"; then
-        echo own
-    else
-        echo foreign
-    fi
+    while read -r package; do
+        if [[ "$name" == "$package"-[0-9]* ]]; then
+            echo own
+            return
+        fi
+    done <<<"$OWN_PACKAGES"
+    echo foreign
 }
 
 # The derivations that "guix system image --dry-run" lists as to be built,
@@ -204,8 +225,8 @@ gate() {
 
 cmd_check() {
     require_goonix
-    local declaration failed=0
-    for declaration in $RELEASE_SYSTEMS; do
+    local declaration failed=0 systems="${*:-$RELEASE_SYSTEMS}"
+    for declaration in $systems; do
         ( gate "$declaration" >/dev/null ) || failed=1
     done
     (( failed == 0 )) || die "the build would not use substitutes as expected"
@@ -239,10 +260,10 @@ prerequisites() {
 
 cmd_prefetch() {
     require_goonix
-    local declaration options
+    local declaration options systems="${*:-$RELEASE_SYSTEMS}"
     local -a drvs
     local attempt
-    for declaration in $RELEASE_SYSTEMS; do
+    for declaration in $systems; do
         options="$(gate "$declaration")" || die "stopping before the build"
         mapfile -t drvs < <(prerequisites "$declaration")
         (( ${#drvs[@]} > 0 )) || die "no prerequisites found for $declaration"

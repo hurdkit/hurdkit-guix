@@ -186,6 +186,7 @@ linux-ref-qmp:
 	@$(LINUX_REF_VM) qmp $(GUIX_QMP_ARGS)
 
 # The live graphics gate of the niri plan's stage 0 (Hurd and Linux
-# reference guests, both host GPUs; STAGE0_GPUS=nvidia for one).
+# reference guests, both host GPUs; STAGE0_GPUS=nvidia for one, and an
+# empty STAGE0_GPUS for the Hurd guest alone).
 stage0-check:
 	@bash scripts/stage0_check.sh

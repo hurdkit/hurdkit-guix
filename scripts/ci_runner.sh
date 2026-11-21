@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Prepare a GitHub-hosted Ubuntu runner for building the released images
-# (.github/workflows/images.yml): disk, KVM, Nix, a goonix guix-daemon,
-# and the store caches. Most commands need root and run their privileged
-# parts through SUDO. See skills/GUIX.md, "Release images".
+# and the test guests (.github/workflows/images.yml and guests.yml): disk,
+# KVM, Nix, a goonix guix-daemon, and the store caches. Most commands need
+# root and run their privileged parts through SUDO. See skills/GUIX.md,
+# "Release images" and "Guest tests in CI".
 #
 # Usage: ci_runner.sh <command> [arguments]
 #
@@ -10,7 +11,8 @@
 #                      /gnu, /var/guix, the daemon's build directory, the
 #                      saved store (CI_STORE_CACHE) and the images
 #                      (CI_WORK/release) on it
-#   kvm                let the runner's user open /dev/kvm
+#   kvm [--require]    let the runner's user open /dev/kvm; with --require,
+#                      fail when it cannot (the guest tests need KVM)
 #   install-nix        install Nix (NIX_VERSION, checked against
 #                      NIX_INSTALL_SHA256) as a multi-user daemon
 #   nix-cache-export DIR
@@ -125,7 +127,16 @@ cmd_disk() {
 }
 
 cmd_kvm() {
+    local require=0
+    case "${1:-}" in
+        "") ;;
+        --require) require=1 ;;
+        *) die "usage: ci_runner.sh kvm [--require]" ;;
+    esac
     if [[ ! -e "$CI_ROOT/dev/kvm" ]]; then
+        if (( require )); then
+            die "no /dev/kvm; the guest tests need KVM"
+        fi
         say "no /dev/kvm; guests will run without acceleration"
         return 0
     fi
@@ -137,6 +148,8 @@ cmd_kvm() {
     run udevadm settle
     if [[ -r "$CI_ROOT/dev/kvm" && -w "$CI_ROOT/dev/kvm" ]]; then
         say "/dev/kvm is usable"
+    elif (( require )); then
+        die "/dev/kvm exists but is not usable; the guest tests need KVM"
     else
         say "/dev/kvm exists but is not usable; guests will run without acceleration"
     fi

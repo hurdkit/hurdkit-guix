@@ -23,6 +23,10 @@
 #
 # A failed matrix leaves the guest running for inspection. After a passing
 # matrix the guest must have shut down cleanly.
+#
+# Exit status: 0 when the matrix passed and the guest shut down cleanly, 1
+# when the matrix or the setup failed, 2 for a wrong usage, 3 when the
+# matrix passed but the guest did not shut down cleanly (G20 after 9pfs).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -182,7 +186,7 @@ fi
 if [[ "$REUSE" != 1 ]]; then
     guix_vm stop || {
         echo "guix-virtio-test: the $device matrix passed, but the guest did not shut down cleanly" >&2
-        exit 1
+        exit 3
     }
 fi
 echo "guix-virtio-test: $device matrix passed"
