@@ -280,6 +280,11 @@ jobs:
         env:
           RUN: ${{ matrix.run }}
         run: nix develop --command bash -eo pipefail -c "$RUN"
+      # What the daemon logged when a check failed, and whether the kernel
+      # killed it: a daemon that dies leaves only "connection refused".
+      - name: Journal of the daemon
+        if: failure()
+        run: bash scripts/ci_runner.sh guix-journal
       # The serial logs, QEMU traces, frames and results of a failed check;
       # not img/keys.
       - name: Logs of the guests
