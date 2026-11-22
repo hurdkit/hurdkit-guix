@@ -22,6 +22,9 @@
 #   guix-daemon        start goonix's guix-daemon (run it inside nix develop)
 #                      with the build farms' keys authorized and no signing key
 #   guix-stop          stop that daemon
+#   guix-journal       print what that daemon logged, and the kernel's lines
+#                      about processes it killed or that crashed (after a
+#                      failed check; never fails itself)
 #   store-save FILE    write /gnu/store and the store database to FILE (daemon
 #                      stopped)
 #   store-restore FILE unpack FILE into /gnu/store and /var/guix (daemon
@@ -265,6 +268,15 @@ cmd_guix_stop() {
     fi
 }
 
+cmd_guix_journal() {
+    # A daemon that dies takes its reason with it: its own log, and the
+    # kernel's word when it was killed (out of memory) or crashed.
+    run journalctl --unit="$GUIX_UNIT" --no-pager --lines=300 || true
+    { run dmesg 2>/dev/null || true; } |
+        grep -iE 'out of memory|oom|killed process|segfault|general protection' |
+        tail -n 40 || true
+}
+
 cmd_store_save() {
     (( $# == 1 )) || die "usage: ci_runner.sh store-save FILE"
     local file="$1"
@@ -307,6 +319,7 @@ case "$command" in
     guix-users) cmd_guix_users "$@" ;;
     guix-daemon) cmd_guix_daemon "$@" ;;
     guix-stop) cmd_guix_stop "$@" ;;
+    guix-journal) cmd_guix_journal "$@" ;;
     store-save) cmd_store_save "$@" ;;
     store-restore) cmd_store_restore "$@" ;;
     store-fingerprint) cmd_store_fingerprint "$@" ;;

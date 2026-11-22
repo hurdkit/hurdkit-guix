@@ -294,5 +294,33 @@ else
     not_ok 'a new store item changes the fingerprint'
 fi
 
+# --- guix-journal: the daemon's log and the kernel's verdict, never a failure ---
+stub journalctl <<'SH'
+#!/usr/bin/env bash
+echo "journalctl $*" >> "$TEST_DIR/calls"
+echo "guix-daemon: a line the daemon logged"
+exit "${FAKE_JOURNAL_STATUS:-0}"
+SH
+stub dmesg <<'SH'
+#!/usr/bin/env bash
+echo "[1.0] usb 1-1: new device"
+echo "[2.0] Out of memory: Killed process 4242 (guix-daemon)"
+SH
+fresh_root
+journal="$(runner bash "$REPO_ROOT/scripts/ci_runner.sh" guix-journal 2>&1)"
+status=$?
+if [[ $status -eq 0 ]] && grep -q -- '--unit=hurdkit-guix-daemon' "$TEST_DIR/calls" &&
+        grep -q 'a line the daemon logged' <<<"$journal" &&
+        grep -q 'Killed process 4242' <<<"$journal" && ! grep -q 'usb 1-1' <<<"$journal"; then
+    ok "guix-journal prints the daemon's journal and the kernel's kill lines only"
+else
+    not_ok "guix-journal prints the daemon's journal and the kernel's kill lines only" "status $status"$'\n'"$journal"
+fi
+if FAKE_JOURNAL_STATUS=1 runner bash "$REPO_ROOT/scripts/ci_runner.sh" guix-journal >/dev/null 2>&1; then
+    ok 'guix-journal does not fail when the journal cannot be read'
+else
+    not_ok 'guix-journal does not fail when the journal cannot be read'
+fi
+
 echo "1..$number"
 exit "$failures"
