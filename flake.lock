@@ -25,11 +25,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1795296727,
-        "narHash": "sha256-0XMRMJ8jqTjiH8RjG+PqihGd2SMxKDuCEdWkIndDghQ=",
+        "lastModified": 1795307400,
+        "narHash": "sha256-1wdoVUDBe/Ga1gWbTOV0IEYNf7WUFvXG9csPvBk+VHo=",
         "owner": "hurdkit",
         "repo": "goonix",
-        "rev": "0d3550326cdc49116d787bf4ae76e9b6a1e24382",
+        "rev": "e18dcb1f6513d31481455ec5f11e0268a1b83103",
         "type": "github"
       },
       "original": {
