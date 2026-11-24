@@ -108,12 +108,19 @@ jobs:
         run: bash scripts/ci_runner.sh disk
       - name: Install Nix
         run: bash scripts/ci_runner.sh install-nix
+      # The goonix job only looked goonix up, and GitHub can evict the entry
+      # before this job restores it: when the repository's cache space is
+      # full, the entries read least recently go first. Then the development
+      # shell builds goonix here, as the goonix job does.
       - name: Restore goonix
+        id: goonix-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/hurdkit-ci/nix
           key: ${{ needs.goonix.outputs.key }}
-          fail-on-cache-miss: true
+      - name: Goonix not in the cache
+        if: steps.goonix-cache.outputs.cache-hit != 'true'
+        run: echo "::warning::goonix was not in the Actions cache; this job builds it"
       - name: Development shell (G1)
         run: nix develop --command guix --version
       - name: Build users
@@ -242,12 +249,19 @@ jobs:
         run: bash scripts/ci_runner.sh kvm --require
       - name: Install Nix
         run: bash scripts/ci_runner.sh install-nix
+      # The goonix job only looked goonix up, and GitHub can evict the entry
+      # before this job restores it: when the repository's cache space is
+      # full, the entries read least recently go first. Then the development
+      # shell builds goonix here, as the goonix job does.
       - name: Restore goonix
+        id: goonix-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/hurdkit-ci/nix
           key: ${{ needs.goonix.outputs.key }}
-          fail-on-cache-miss: true
+      - name: Goonix not in the cache
+        if: steps.goonix-cache.outputs.cache-hit != 'true'
+        run: echo "::warning::goonix was not in the Actions cache; this job builds it"
       - name: Development shell (G1)
         run: nix develop --command guix --version
       - name: Build users

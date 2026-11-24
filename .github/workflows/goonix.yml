@@ -2,7 +2,8 @@
 # in the Actions cache as a Nix binary cache: the paths of the development
 # shell that cache.nixos.org lacks, with their closures. images.yml and
 # guests.yml call this workflow; their jobs restore the cache with the key
-# it outputs. skills/GUIX.md, "Release images", says how the caches fit
+# it outputs, and build goonix themselves when GitHub evicted the entry in
+# between. skills/GUIX.md, "Release images", says how the caches fit
 # together.
 name: goonix
 
