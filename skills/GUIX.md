@@ -237,7 +237,13 @@ runners:
 1. Job `goonix` (`.github/workflows/goonix.yml`, which `guests.yml` calls
    too) builds goonix with Nix once per `flake.nix` and `flake.lock`, and
    keeps the paths of the development shell that cache.nixos.org lacks,
-   with their closures, as a Nix binary cache in the Actions cache.
+   with their closures, as a Nix binary cache in the Actions cache. When
+   that entry is there already it only looks it up, and GitHub can evict
+   the entry before the jobs after it restore it: when the repository's
+   cache space is full, the entries read least recently go first. A job
+   that does not find it builds goonix itself in its development shell and
+   says so in a warning; `tests/ci-goonix-cache.t` checks that every
+   restore of goonix goes on that way.
 2. Job `images`: `scripts/ci_runner.sh` puts `/gnu`, `/var/guix` and the
    daemon's build directory on an ext4 disk (G4), opens `/dev/kvm`,
    installs Nix at the version and checksum it pins, and starts goonix's
