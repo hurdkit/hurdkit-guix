@@ -10,7 +10,7 @@
 ;; Both come from the "hurdkit" branch of Hurdkit's copy of the project.
 ;; Guix needs fixed commits and hashes: these two are pins of this module
 ;; alone, moved forward by hand (commit and base32 hash together).
-(define %gnumach-hurdkit-commit "c25fcc3c86c346d137edf1bc80b55992a024aec5")
+(define %gnumach-hurdkit-commit "a5c2e0de8909e9eb50bab77f633bfed4fbab22d7")
 (define %hurd-hurdkit-commit "f26d287cc854c9b423e62ace92e39e1e2356ae5e")
 
 (define-public gnumach-hurdkit
@@ -26,7 +26,7 @@
              (commit %gnumach-hurdkit-commit)))
        (file-name (git-file-name "gnumach-hurdkit" version))
        (sha256
-        (base32 "0rvil4zgfsby7j4ignzlmanw95rdxk8jf14xbfkb04ykqqbvig21"))))
+        (base32 "0dvljb003k5scy1547c74j038xhxg5g4j0c37ywknxi5qr113l5w"))))
     (synopsis "GNU Mach from Hurdkit's branch, at a pinned commit")))
 
 ;; The same source built for several processors. The number is a
