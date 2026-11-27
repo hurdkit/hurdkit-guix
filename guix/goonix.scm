@@ -26,7 +26,7 @@
              (guix packages)
              (guix utils))
 
-(define %goonix-commit "5d83110cc2f0166f267accf458d553a76f424f0d")
+(define %goonix-commit "b606aadb0e78f84b4eb34e9cad6e6a12ac49150f")
 (define %goonix-url "https://github.com/hurdkit/goonix.git")
 
 ;; The same version string as the goonix package of the Nix flake, so that
@@ -47,7 +47,7 @@
             (file-name (git-file-name "goonix" %goonix-commit))
             (sha256
              (base32
-              "10pcl9bx1w31ifqc01fmdvvh82fbzlwkd0dvzwlym6ql27abgnwr"))))
+              "1fn7x9g9ck6acd4hbhzcfgka1r43rp3rb9b0m572f3s6isvd5icy"))))
   (arguments
    (substitute-keyword-arguments (package-arguments guix)
      ;; Guix itself builds serially for bit-reproducible .go files; for a
